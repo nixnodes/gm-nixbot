@@ -156,7 +156,8 @@ end
 
 e2function number entity:setFollowTarget(entity target)
 	if ( !ValidateNixBot(self, this) ) then return 0 end
-	this:Interrupt()
+	
+	this:SetInterrupt()
 	return this:SetFollowTarget(target) && 1 || 0
 end
 
@@ -192,10 +193,11 @@ e2function void entity:gotoPos(vector pos)
 	self:AssignTask(self.Tasks, self.Goto,{ToVector(pos), {e2docb=true} })
 end
 
-e2function void entity:doReload(vector pos)
+e2function void entity:doReload()
 	if ( !ValidateNixBot(self, this) ) then return 0 end
 	
-	this:DoReload()
+	this:SetInterrupt()
+	this:AssignTask(this.Tasks, this.DoReload,{})
 end
 
 e2function void entity:enableItemPickup(number switch)

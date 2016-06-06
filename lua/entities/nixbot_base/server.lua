@@ -1407,6 +1407,7 @@ function ENT:DoReload()
 		self:PlaySequenceAndWaitE( self:GetAnimSeq("Reload"), self:GetStatsReloadSpeed() )
 		self.Weapon:SetClip1(self.Weapon:GetMaxClip1())
 	end
+	return true
 end
 
 function ENT:PlaySequenceAndWaitE( name, speed )

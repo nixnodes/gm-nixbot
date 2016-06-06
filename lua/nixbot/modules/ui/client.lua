@@ -26,9 +26,9 @@ function PANEL:Load()
 			
 	local opt = self:CreateCheckField(general_opts, "patrol", "Patrol area", function(s, bval) 
 		if ( IsValid(ent) ) then 
-			ent:WriteVar("Patrol", bval) 
+			ent:SendCommand("Patrol", bval) 
 			if ( bval == false ) then
-				ent:WriteVar("Interrupt") 
+				ent:SendCommand("Interrupt") 
 			end
 		end
 	end, ent:GetPatrol() ) 	
@@ -37,11 +37,11 @@ function PANEL:Load()
 	opt = self:CreateCheckField(general_opts, "follow_me", "Follow me", function(s, bval) 
 		if ( IsValid(ent) ) then		
 			if ( bval == true ) then
-				ent:WriteVar("FollowTarget", ent:CPPIGetOwner() ) 	
-				ent:WriteVar("Interrupt") 
+				ent:SendCommand("FollowTarget", ent:CPPIGetOwner() ) 	
+				ent:SendCommand("Interrupt") 
 			elseif ( IsValid(ent:GetFollow()) && 
 					 ent:GetFollow() == ent:CPPIGetOwner() ) then
-				ent:WriteVar("FollowTarget", nil ) 
+				ent:SendCommand("FollowTarget", nil ) 
 			end
 		end
 	end, ent:GetFollow() == ent:CPPIGetOwner() ) 	
@@ -53,10 +53,10 @@ function PANEL:Load()
 	opt = self:CreateSingleSlider(general_opts, function(s, val) 
 		timer.Create("N_"..lid.."_APP", 1, 1, function()		
 			if ( IsValid(ent) ) then		
-				ent:WriteVar("PPRebuild", tonumber(val) ) 			
+				ent:SendCommand("PPRebuild", tonumber(val) ) 			
 			end
 		end)
-	end,ent:GetPPDensity(), "PP Density", "ppd", 100, 2000, 1 ) 	
+	end,ent:GetPPDensity(), "PP Density", "ppd", 100, 10000, 1 ) 	
 	
 	opt:Dock(TOP)
 	
@@ -74,8 +74,9 @@ function MODULE:_PostLoad()
 
 		local e = LocalPlayer():GetEyeTrace().Entity
 			
-		if ( !IsValid(e) || !e:GetClass():match("^nixbot_") || 
-				e:CPPIGetOwner() != LocalPlayer() ) then return end
+		if ( !IsValid(e) || !e:IsNixBot() || 
+				e:CPPIGetOwner() != LocalPlayer() ||
+				LocalPlayer():GetPos():Distance(e:GetPos()) > 500 ) then return end
 		
 		p._target = e
 		p._base = p:Load()

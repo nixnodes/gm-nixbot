@@ -25,6 +25,27 @@ hook.Add("EntityFireBullets", "NX.m.fb", function (ent, data)
 	end
 end)
 
+do
+
+  local meta = FindMetaTable("Entity")
+  
+  function meta:IsNixBot()
+    return self.NixBot == true
+  end
+  
+  meta = FindMetaTable("Player")
+  
+  function meta:IsNixBot()
+    return false
+  end
+  
+  local meta_npc = FindMetaTable("NPC")
+  
+  function meta_npc:IsNixBot()
+    return false
+  end
+
+end
 
 if (SERVER ) then
 	include "server.lua"
@@ -35,7 +56,7 @@ else
 		
 	end
 	
-	function ENT:WriteVar(v, d)
+	function ENT:SendCommand(v, d)
 		local t = {
 			e = self,
 			n = v,

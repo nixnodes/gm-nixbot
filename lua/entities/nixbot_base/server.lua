@@ -113,25 +113,7 @@ hook.Add("EntityTakeDamage", "nixbot_skill_gain", function(target, dmg)
 end)
 
 do
-	local meta = FindMetaTable("Entity")
-	
-	function meta:IsNixBot()
-		return self.NixBot == true
-	end
-	
-	meta = FindMetaTable("Player")
-	
-	function meta:IsNixBot()
-		return false
-	end
-	
-	local meta_npc = FindMetaTable("NPC")
-	
-	function meta_npc:IsNixBot()
-		return false
-	end
-			
-	meta = FindMetaTable("NextBot")
+	local meta = FindMetaTable("NextBot")
 	
 	function meta:IsNPC()
 		return true
@@ -178,8 +160,7 @@ function ENT:Initialize()
 		
 	self:SetModel( self.Model )
 	
-	self:AddFlags( bit.bor( FL_NPC, FL_AIMTARGET, FL_OBJECT, FL_SWIM, FL_FLY, FL_FAKECLIENT, FL_STEPMOVEMENT )  )
-	print (  self:GetFlags() )
+	self:AddFlags( bit.bor( FL_NPC, FL_AIMTARGET, FL_OBJECT, FL_SWIM, FL_FLY, FL_STEPMOVEMENT )  )
 	
 	self:SetPPDensity(400)
 
@@ -1112,17 +1093,19 @@ function ENT:IsFollowing()
 end
 
 function ENT:DetectEnemyInView()
-	local _ents = self:FindInCone( self:EyePos(), self:EyeAngles():Forward(), self:GetStatsVisRange(), math.pi / 2)
+	local _ents = self:FindInCone( self:EyePos(), self:EyeAngles():Forward(), self:GetStatsVisRange(), math.pi / 2.25)
 
 	local cres = {
 		distance = 0,
+		score = 0,
 		ent = nil,		
 		ally_disp = 0,
 		ent_ally = nil
 	}
 		
 	for k, v in ipairs( _ents ) do
-		if ( !IsValid(v) || !self:Visible(v) ) then
+		if ( !IsValid(v) || !self:Visible(v) ||
+		      v == self:GetEnemy() ) then
 			continue
 		end
 		
@@ -1146,13 +1129,15 @@ function ENT:DetectEnemyInView()
 			continue
 		end		
 				
-		if ( distance < cres.distance) then
-			cres.distance = distance
+		local score = -(disp - math.abs(disp) ) * (distance) 
+				
+		if ( score > cres.score) then
+			cres.score = score
 			cres.ent = v
 		end
 		
 	end
-		
+			
 	if ( cres.ent_ally && !self:IsFollowing() ) then		
 		if ( cres.ally_disp >= NIXBOT_RELATION_NEUTRAL ) then
 			self:PlaySound("GreetPlayerFriend", 30)			
@@ -1161,8 +1146,7 @@ function ENT:DetectEnemyInView()
 		end
 	end
 		
-	self.ally_in_view = cres.ent_ally
-	
+	self.ally_in_view = cres.ent_ally	
 	
 	return cres.ent
 end
@@ -1178,7 +1162,7 @@ function ENT:DetectEnemyCog()
 	}
 
 	for k, v in ipairs( _ents ) do
-		if ( !IsValid(v) ) then
+		if ( !IsValid(v) || v == self:GetEnemy() ) then
 			continue
 		end
 		
@@ -1822,10 +1806,11 @@ function ENT:Main()
 				elseif ( IsValid(self.FollowTarget) ) then		
 					self:SetMood(NIXBOT_MOOD_RELAXED)
 					self.EvadeProximityDistance = 30
-					if ( self:Follow ( self.FollowTarget, { 
+					if ( self:Follow ( { 
 							tolerance = 250, attack = true
 						}) == false ) then
 						self.SELastPlayed["GreetPlayerFriend"] = os.time()
+						self.SELastPlayed["GreetPlayerFoe"] = os.time()
 						self:SetFollowTarget(nil)
 					end
 					
@@ -2347,12 +2332,12 @@ function ENT:DischargeBurst (enemy, count, path)
 		
 		self:SetAimVector((av - self:GetAimOffset(enemy)) - self:GetShootPos()) 
 		self:AimAt(av)
+				
+		self.Weapon:PrimaryAttack()
+				
+		count = count - 1
 		
 		coroutine.wait(0.06)
-		
-		self.Weapon:PrimaryAttack()
-		
-		count = count - 1
 		
 		if ( path ) then
 			path:Update(self)
@@ -2648,8 +2633,11 @@ function ENT:GetFollowTarget()
 	return self.FollowTarget
 end
 
-function ENT:Follow (target, options)
-	if ( self:GetRelationship(target) < NIXBOT_RELATION_FRIEND ) then
+function ENT:Follow (options)
+  local target = self.FollowTarget
+  
+	if ( !IsValid(target) ||
+	     self:GetRelationship(target) < NIXBOT_RELATION_FRIEND ) then
 		return false
 	end
 
@@ -2689,12 +2677,15 @@ function ENT:Follow (target, options)
 		return
 	end
 	
-	while ( path:IsValid() && IsValid(target) && 
+	while ( path:IsValid() && 
 			!( options.attack && self:HaveEnemy() )  ) do
+		
+		target = self.FollowTarget
 										
-		if ( self:GetRelationship(target) < NIXBOT_RELATION_FRIEND ) then
-			return false
-		end
+		if ( !IsValid(target) ||
+         self:GetRelationship(target) < NIXBOT_RELATION_FRIEND ) then
+      return false
+    end
 		
 		local dist = self:GetRangeTo(target:GetPos())
 					
@@ -2709,7 +2700,7 @@ function ENT:Follow (target, options)
 			target.nixbot_last_ping = RealTime()
 		end
 					
-		if ( self:GetBusyTimeout() > RealTime()  ) then
+		if ( self:GetBusyTimeout() > RealTime() ) then
 			coroutine.yield()
 			continue
 		end

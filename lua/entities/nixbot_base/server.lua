@@ -112,30 +112,6 @@ hook.Add("EntityTakeDamage", "nixbot_skill_gain", function(target, dmg)
 	
 end)
 
-do
-	local meta = FindMetaTable("NextBot")
-	
-	function meta:IsNPC()
-		return true
-	end
-	
-	meta = FindMetaTable("Entity")
-	
-	if ( !meta.CPPIGetOwner ) then
-		function meta:CPPIGetOwner()
-			return NULL
-		end
-	end
-	
-	if ( !meta.CPPISetOwner ) then
-		function meta:CPPISetOwner()
-			return NULL
-		end
-	end
-	
-	
-end
-
 local function ValidateEnemyDefault(self, enemy)
 	if ( self:GetRelationship(enemy) > NIXBOT_RELATION_ENEMY ) then
 		return false		

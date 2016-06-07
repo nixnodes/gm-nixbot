@@ -26,8 +26,6 @@ e2function entity nbCreate(string class)
 		return NULL
 	end
 	
-	
-	
 	bot:CPPISetOwner(self.player)	
 	local index = bot:EntIndex()
 	self.RegisteredNBs[index] = bot
@@ -35,10 +33,7 @@ e2function entity nbCreate(string class)
 	
 	bot:Spawn()
 	bot:SetPos( self.entity:GetPos() + Vector(math.random(-1,1), math.random(-1,1), 0 ) * 20 )
-			
-			
-	
-			
+						
 	bot:RegisterHook("OnKilled", function()
 		ExecuteEvent(self, bot, "CLK_Killed")
 	end)

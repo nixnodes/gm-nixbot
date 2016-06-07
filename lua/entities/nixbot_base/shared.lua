@@ -33,6 +33,18 @@ do
     return self.NixBot == true
   end
   
+  if ( !meta.CPPIGetOwner ) then
+    function meta:CPPIGetOwner()
+      return NULL
+    end
+  end
+  
+  if ( !meta.CPPISetOwner ) then
+    function meta:CPPISetOwner()
+      return NULL
+    end
+  end
+  
   meta = FindMetaTable("Player")
   
   function meta:IsNixBot()
@@ -44,7 +56,15 @@ do
   function meta_npc:IsNixBot()
     return false
   end
-
+  
+  meta = FindMetaTable("NextBot")
+  
+  function meta:IsNPC()
+    return true
+  end
+  
+  meta = FindMetaTable("Entity")
+  
 end
 
 if (SERVER ) then

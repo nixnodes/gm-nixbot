@@ -14,9 +14,13 @@ local function ExecuteEvent(self, bot, clk)
 	self[clk] = 0
 end
 
+local function Notify(ply, msg)
+  ply:SendLua( 'hook.Run("NIXBOT.notify.player","' .. msg .. '")' )
+end
+
 e2function entity nbCreate(string class)
-	if ( !class || !IsValid(self.player) ||
-		 hook.Run("PlayerSpawnNPC", self.player, class, nil ) == false ) then
+	if ( !class || !IsValid(self.player) || 
+		hook.Run("PlayerSpawnNPC", self.player, class, nil ) == false ) then
 		return NULL
 	end
 	
@@ -25,6 +29,14 @@ e2function entity nbCreate(string class)
 	if ( !IsValid(bot) ) then
 		return NULL
 	end
+		
+	if ( self.NB_SPC / math.Clamp(RealTime() - self.NBLastSpawned, 1, 5) >= 5 ) then
+	  Notify(self.player, "NB spawn/time limit exceeded")
+    return NULL
+	end 
+	
+	self.NB_SPC = self.NB_SPC + 1	
+	self.NBLastSpawned = RealTime()
 	
 	bot:CPPISetOwner(self.player)	
 	local index = bot:EntIndex()
@@ -201,6 +213,12 @@ e2function void entity:enableItemPickup(number switch)
 	this:EnableItemPickup(switch != 0 && true || false )
 end
 
+e2function void entity:enableSupplyAllies(number switch)
+  if ( !ValidateNixBot(self, this) ) then return 0 end
+  
+  this:EnableSupplyAllies(switch != 0 && true || false )
+end
+
 e2function number entity:selectWeapon(string weap)
 	if ( !ValidateNixBot(self, this) ) then return 0 end
 	
@@ -268,6 +286,8 @@ registerCallback("construct",function(self)
 	self.CLK_Used = 0
 	self.LastBot = NULL
 	self.LastKilled = NULL
+	self.NBLastSpawned = RealTime()
+	self.NB_SPC = 0
 end)
 
 registerCallback("destruct",function(self)

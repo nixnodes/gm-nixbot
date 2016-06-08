@@ -34,6 +34,20 @@ function PANEL:Load()
 	end, ent:GetPatrol() ) 	
 	opt:Dock(TOP)
 	
+	opt = self:CreateCheckField(general_opts, "pickup_items", "Pick up items", function(s, bval) 
+    if ( IsValid(ent) ) then 
+      ent:SendCommand("EnableItemPickup", bval) 
+    end
+  end, ent:GetPickupItems() )  
+  opt:Dock(TOP)
+  
+  opt = self:CreateCheckField(general_opts, "supply_allies", "Supply allies with provisions", function(s, bval) 
+    if ( IsValid(ent) ) then 
+      ent:SendCommand("EnableSupplyAllies", bval) 
+    end
+  end, ent:GetSupplyAllies() )  
+  opt:Dock(TOP)
+	
 	opt = self:CreateCheckField(general_opts, "follow_me", "Follow me", function(s, bval) 
 		if ( IsValid(ent) ) then		
 			if ( bval == true ) then

@@ -33,13 +33,6 @@ local USABLE_PROPS = {
 	["prop_physics"] = true,
 }
 
-hook.Add( "PlayerSpawnedNPC", "NX.policy.spawned.npc", function ( ply, ent )
-	if ( ent.NixBot ) then
-		ply:AddCount(ent:GetClass(), ent)
-		ply:AddCount("nbs", ent)
-	end
-end )
-
 local function CheckLimits(ply, class)
 	if ( nil != cvars.Number( "sbox_max"..class ) && 
 			ply:CheckLimit(class) == false ) then
@@ -192,9 +185,9 @@ function ENT:Initialize()
 	self.Stats.AwarenessInv = math.Clamp(self.Options.Stats.Awareness, 0, 1)
 	self.Stats.Awareness = math.Clamp(1 - self.Options.Stats.Awareness, 0, 1)
 	 
-	self.Stats.RunSpeed = self.Options.Stats.Athletics * 650
-	self.Stats.WalkSpeed = self.Stats.RunSpeed * 0.384
-	self.Stats.Accel = AAAvg * 400
+	self.Stats.RunSpeed = math.Round(self.Options.Stats.Athletics * 650)
+	self.Stats.WalkSpeed = math.Round(self.Stats.RunSpeed * 0.384)
+	self.Stats.Accel = AAAvg * 600
 	self.Stats.Decel = AAAvg * 400
 	
 	self.Stats.ReloadSpeed = self.Options.Stats.Athletics * 4.0
@@ -205,9 +198,9 @@ function ENT:Initialize()
 	self.Stats.CognitiveDetectRange = self.Options.Stats.Awareness * 6000
 	self.Stats.VisibleDetectRange = self.Options.Stats.Awareness * 3750
 	self.Stats.TargetFocusRange = self.Options.Stats.Awareness * 1500
-	self.Stats.AbsoluteLoseTargetRange = self.Options.Stats.Awareness * 8000
+	self.Stats.AbsoluteLoseTargetRange = self.Options.Stats.Awareness * 15000
 	
-	print (
+	--[[print (
 		self:GetStatsAwareness(),
 		self:GetAwareness(),
 		self:GetStatsCogRange(),
@@ -216,7 +209,7 @@ function ENT:Initialize()
 		self:GetStatsRunspeed(),
 		self:GetStatsWalkspeed(),
 		self:GetStatsAccel()
-	)
+	) ]]
 	
 	self:SetMaxHealth(self.Options.Stats.Health)
 	self:SetHealth(self.Options.Stats.Health)		
@@ -253,9 +246,31 @@ function ENT:Initialize()
 		
 	self:SetPatrol(true)	
 	self:EnableItemPickup(true)
+	self:EnableSupplyAllies(true)
 	
 	self.Hooks = NIXBOT.hook:CreateContext()
 	
+	self:InitializePhysics()
+end
+
+function ENT:InitializePhysics()
+  self:PhysicsInitShadow(true, true)
+    
+  local phys = self:GetPhysicsObject()
+  if ( !phys:IsValid() ) then
+    return false
+  end
+     
+  phys:SetMass(85)
+  phys:SetBuoyancyRatio(1)
+  
+  phys:Wake()
+  
+  --print(phys:GetMass(), phys:IsMotionEnabled(), phys:IsAsleep(), phys:GetInertia())
+  
+  
+  return true
+  
 end
 
 function ENT:RegisterHook(...)
@@ -269,6 +284,7 @@ end
 function ENT:RunHook(...)
 	self.Hooks:RunHook(...)
 end
+
 
 function ENT:PlaySound(event, cooldown)
 		
@@ -317,6 +333,12 @@ end
 
 function ENT:SayToOwner(...)
 	self:SayToPlayer(self:CPPIGetOwner(), ...)
+end
+
+function ENT:Debug(...)
+  if ( self.PrintDebug ) then
+    self:SayToPlayer(self:CPPIGetOwner(), ...)
+  end
 end
 
 function ENT:GetRank()
@@ -378,6 +400,10 @@ end
 function ENT:GetStatsBravery()
 	return self.Options.Stats.Bravery
 end 
+
+function ENT:GetStatsAthletics()
+  return self.Options.Stats.Athletics
+end
 
 function ENT:GetAnimAct(act)	
 	local activity = self.AnimAct[act]	
@@ -531,11 +557,11 @@ function ENT:EquipWeapon(weap)
 	self:SetupActivityMoodTranslateAI(ht)
 	
 	if ( ht == "ar2" ) then
-		self.AimAngleOffset = Angle(0,0,0)		
+		self.AimAngleOffset = Angle(0,8,0)		
 		self.AnimSeq.Reload = "reload_smg1"	
 		
 	else
-		self.AimAngleOffset = Angle(0,0,0)
+		self.AimAngleOffset = Angle(0,-8,0)
 		self.AnimSeq.Reload = "reloadpistol"
 	end
 	
@@ -852,8 +878,8 @@ function ENT:OnContact( ent )
 	if ( UseAllowed(ent) ) then
 		ent.nixbot_last_used = os.time()	
 		ent:Use(self, self, USE_TOGGLE, 0)
-		self:SayToOwner(self:EntIndex(), " contact, using", ent)
-	elseif ( self:CheckValidPickup(ent) ) then
+		self:Debug(self:EntIndex(), " contact, using", ent)
+	elseif ( self:GetPickupItems() && self:CheckValidPickup(ent) ) then
 		self:PickupItem(ent)
 	end
 end
@@ -1047,7 +1073,8 @@ function ENT:FindInCone(cone_origin, cone_direction, cone_radius, cone_angle)
 	local cos = math.cos(cone_angle)
 
 	for _, entity in pairs(entities) do
-		if ( entity == self || entity:IsWorld() ) then
+		if ( entity == self || entity:IsWorld() || 
+		      entity:GetParent() == self ) then
 			continue
 		end
 		local pos = entity:GetPos()
@@ -1064,6 +1091,74 @@ function ENT:FindInCone(cone_origin, cone_direction, cone_radius, cone_angle)
 end
 
 
+function ENT:SupplyAllies()
+  local _ents = ents.FindInSphere(self:GetPos(), 1000)
+  
+  local cres = {
+    score = -0xFFFFFF,
+    ent = nil
+  }
+  
+  local delivery_list = {}
+  
+  for _,v in ipairs( _ents ) do
+    if ( v == self || !IsValid(v) || !( v:IsPlayer() || v:IsNPC() ) ) then
+      continue
+    end
+    
+    local disp = self:GetRelationship(v)
+    
+    if ( disp < NIXBOT_RELATION_NEUTRAL ) then
+      continue
+    end
+    
+    local distance = self:GetPos():Distance(v:GetPos())    
+    local score = disp * (100/distance)
+    
+    if ( self:HasItem("Entity", "item_healthkit") &&
+          v:Health() < v:GetMaxHealth() / 3 &&
+          self:GetItemCount("Entity", "item_healthkit") > 2 ) then
+      score = score + 20000 - v:Health()
+      delivery_list["Entity"] = {
+            class = "item_healthkit"
+          }
+    end
+    
+    if ( score > cres.score) then
+      cres.score = score
+      cres.ent = v
+    end
+    
+  end
+  
+  if ( !cres.ent || 0 == table.Count(delivery_list) ) then
+    return true
+  end
+  
+  
+  self:Goto(cres.ent:GetPos(), 
+            { 
+              notask = true, maxage = 120,
+              activity = self:GetAnimAct("Run"),
+              speed = self:GetStatsRunspeed(),
+              accel = self:GetStatsAccel(),
+              tolerance = 100
+            })
+            
+  if ( !IsValid(cres.ent) || 
+        self:GetPos():Distance(cres.ent:GetPos()) > 100 ) then
+      return true
+  end 
+  
+  for t,v in pairs(delivery_list) do
+    v.num = math.Clamp(math.Round((cres.ent:GetMaxHealth() - cres.ent:Health()) / 25), 0, self:GetItemCount(t,v.class) / 1.75 )
+    self:Debug(self:EntIndex().."dropping ", t, v.class, v.num, cres.ent)
+    self:DropItem(t, v.class, cres.ent:GetPos() + VectorRand() * 7, v.num)
+  end
+  
+  return true
+end
+
 function ENT:IsFollowing()
 	return self.FollowTarget && true || false
 end
@@ -1073,7 +1168,7 @@ function ENT:DetectEnemyInView()
 
 	local cres = {
 		distance = 0,
-		score = 0,
+		score = -0xFFFFFF,
 		ent = nil,		
 		ally_disp = 0,
 		ent_ally = nil
@@ -1105,8 +1200,8 @@ function ENT:DetectEnemyInView()
 			continue
 		end		
 				
-		local score = -(disp - math.abs(disp) ) * (distance) 
-				
+		local score = disp * (100/distance)
+						
 		if ( score > cres.score) then
 			cres.score = score
 			cres.ent = v
@@ -1131,7 +1226,7 @@ function ENT:DetectEnemyCog()
 	local _ents = ents.FindInSphere( self:EyePos(), self:GetStatsCogRange())
 	
 	local cres = {
-		score = 0,
+		score = -0xFFFFFF,
 		ent = nil, 
 		disp = 0,
 		distance = 0
@@ -1163,7 +1258,7 @@ function ENT:DetectEnemyCog()
 		
 		local distance = self:GetPos():Distance(v:GetPos())
 			
-		local score = -(disp - math.abs(disp) ) * (cogscore/distance) 
+		local score = (disp * (100/distance)) * cogscore
 		
 		
 		if ( score > cres.score ) then
@@ -1304,11 +1399,16 @@ function ENT:AlertNeighbors(target, vec)
 	if ( !IsValid(target) || 
 		!self:ValidateEnemy(target) || 
 		!self:Visible(target) ||
-		target == game.GetWorld()) then
+		target == game.GetWorld() ||
+		!self:TargetVisible(target) ) then
 		return true
 	end
 	
 	vec = vec || target:GetPos()
+	
+	if ( vec == nil ) then
+	  return true
+	end
 	
 	--print(self:EntIndex(), "alert", target)
 	
@@ -1370,8 +1470,24 @@ function ENT:DoReload()
 	return true
 end
 
-function ENT:PlaySequenceAndWaitE( name, speed )
-	self:PlaySequenceAndWait( name, speed )
+function ENT:PlaySequenceAndWait( name, speed, dm )
+
+  local len = self:SetSequence( name )
+  speed = speed or 1
+
+  self:ResetSequenceInfo()
+  self:SetCycle( 0 )
+  self:SetPlaybackRate( speed )
+
+  if ( !dm ) then
+    coroutine.wait( len / speed )
+  else
+    coroutine.wait( (len * dm) / speed )
+  end
+end
+
+function ENT:PlaySequenceAndWaitE( name, speed, dm )
+	self:PlaySequenceAndWait( name, speed, dm )
 	self.CurrentActivity = nil
 end
 
@@ -1493,8 +1609,7 @@ function ENT:SetPPRebuild(v)
 	end
 	
 	self:AssignTimedTaskH("AssemblePatrolPoints"..tostring(SysTime())..tostring(v), self.TimedTasks, function(s)
-		--print(123456, v, tostring(s))
-		
+
 		s:AssemblePatrolPoints()
 		
 		return false
@@ -1526,7 +1641,7 @@ function ENT:AssemblePatrolPoints()
 	
 	self.AssemblyInProgress = true
 	
-	self:SayToOwner(self:EntIndex(), " Generating patrol points.." )
+	self:Debug(self:EntIndex(), " Generating patrol points.." )
 	
 	self.PatrolPoints = {}
 	
@@ -1543,14 +1658,13 @@ function ENT:AssemblePatrolPoints()
 		if ( pos == false || CheckPatrolPointDistR(self, pos) == false ) then
 		
 		else
-			--print("found pos ", pos)
 			table.insert(self.PatrolPoints ,pos)
 		end
 		
 		coroutine.yield()
 	end
 	
-	self:SayToOwner(self:EntIndex(), " "..#self.PatrolPoints.." patrol points found" )
+	self:Debug(self:EntIndex(), " "..#self.PatrolPoints.." patrol points found" )
 
 	self:InterruptClr("asmpp")
 	
@@ -1639,7 +1753,6 @@ function ENT:AutoEvade()
 	local pos = self:GetPos() + self:OBBCenter()	
 	local tdist = spos:Distance(pos) 
 	
-	--print(tdist, dist, tdist/dist)
 	
 	if ( tdist > dist ) then
 		return true
@@ -1653,13 +1766,12 @@ function ENT:AutoEvade()
 		subject:Use(self, self, USE_TOGGLE, 0)
 	end
 
-		
 	local dv = (spos - pos):Angle()
-	dv.yaw = dv.yaw + (math.random(90, 150) -  math.Clamp((tdist * tdist/dist ) , 0, 45)) *
+	dv.yaw = dv.yaw + (90 - math.random(0, math.Clamp(tdist,0, 45) ) ) *
 					((math.random(1,2)*2)-3)
 
 	local path = self.path
-	tdist = dist * 1.4
+	tdist = dist * 1.45
 	local loc = pos + dv:Forward() * math.Clamp(tdist , 100, 10000)
 	
 	local ret = DoEvasion(self, loc , subject, function() 
@@ -1856,11 +1968,13 @@ function ENT:PlaySequence(name, speed, rt)
 	
 	local dur = len / speed
 	
-	timer.Simple( dur , function()
-		if ( IsValid(self) ) then
-			self.CurrentActivity = nil
-		end
-	end)
+	if ( !rt ) then
+  	timer.Simple( dur , function()
+  		if ( IsValid(self) ) then
+  			self.CurrentActivity = nil
+  		end
+  	end)
+  end
 	
 	return dur
 end
@@ -1891,6 +2005,10 @@ end
 
 function ENT:HasItem(t, class)
 	return (self.dump[t] && self.dump[t][class] && self.dump[t][class] > 0 ) && true || false
+end
+
+function ENT:GetItemCount(t, class)
+  return (self.dump[t] && self.dump[t][class] && self.dump[t][class] ) || 0
 end
 
 function ENT:PopItem(t, class, c)
@@ -1941,6 +2059,29 @@ function ENT:CheckValidPickup(ent)
 	return false
 end
 
+function ENT:DropItem(t, class, pos, count)
+  local c = self:PopItem(t, class, count)
+  
+  if ( c == false ) then
+    return 0
+  end
+  
+  local i
+  local dropped = 0
+  
+  for i=1,c do 
+    local ent = ents.Create(class)
+    
+    if ( ent ) then
+      ent:Spawn()      
+      ent:SetPos(pos)
+      dropped = dropped + 1
+    end
+  end
+  
+  return dropped  
+end
+
 function ENT:PickupItem(item)
 	self:Give(item:GetClass(), type(item))
 	self.LastPickup = item
@@ -1968,6 +2109,7 @@ function ENT:CheckFollowTargetMinDistance()
 	return true
 end
 
+
 function ENT:LookForUsableItems()
 	if ( self:HaveEnemy() || !self:CheckFollowTargetMinDistance() ) then
 		return
@@ -1977,11 +2119,8 @@ function ENT:LookForUsableItems()
 	local hit 
 	
 	for _,v in ipairs( _ents ) do
-		if ( !IsValid(v)) then
-			continue
-		end
 	
-		if ( !self:CheckValidPickup(v) ) then
+		if ( !IsValid(v) || !self:CheckValidPickup(v) ) then
 			continue
 		end
 		
@@ -2024,11 +2163,27 @@ function ENT:EnableItemPickup(b)
 		self:RemoveTimedTask("LookForUsableItems", self.TimedMovementTasks)
 		self:RemoveTimedTask("LookForUsableItems", self.TimedTasks)
 	end
+	self:SetPickupItems(b)
 end
+
+ENT.SetEnableItemPickup = ENT.EnableItemPickup
+
+function ENT:EnableSupplyAllies(b)
+  if ( b == true ) then
+    self:AssignTimedTask("SupplyAllies", self.TimedMovementTasks, 1)
+    self:AssignTimedTask("SupplyAllies", self.TimedTasks, 1)
+  elseif ( b == false ) then
+    self:RemoveTimedTask("SupplyAllies", self.TimedMovementTasks)
+    self:RemoveTimedTask("SupplyAllies", self.TimedTasks)
+  end
+  self:SetSupplyAllies(b)
+end
+
+ENT.SetEnableSupplyAllies = ENT.EnableSupplyAllies
 
 function ENT:RunBehaviour()
 	
-	--MovementDiscovery(self, "alert")
+	--MovementDiscovery(self, "walk")
 	--[[local a = "jump"
 	for k, v in pairs(TD) do
 	
@@ -2074,7 +2229,7 @@ function ENT:RunBehaviour()
 	self:AssemblePatrolPoints()
 
 	self.MovTypeProc[3] = function(self, seg) 
-		self:SayToOwner(self:EntIndex(), " jumping across gap")
+		self:Debug(self:EntIndex(), " jumping across gap")
 	end
 	
 	self.MovTypeProc[2] = function(self, seg) 
@@ -2082,7 +2237,7 @@ function ENT:RunBehaviour()
 			local dir = (seg.pos - self:GetPos()):GetNormalized()
 			self.loco:SetVelocity(dir * 150)
 			self.loco:Jump()
-			--self:SayToOwner(self:EntIndex(), " jumping")
+			--self:Debug(self:EntIndex(), " jumping")
 			self:PlaySequenceAndWaitE( "jump_holding_jump" )
 		end
 	end
@@ -2090,18 +2245,18 @@ function ENT:RunBehaviour()
 	self.MovTypeProc[1] = function(self) 
 		if ( self.pseg_type_l != 1 ) then
 			self:PlaySequence( "jump_holding_glide" )
-			--self:SayToOwner(self:EntIndex(), " falling")
+			--self:Debug(self:EntIndex(), " falling")
 		end
 	end
 	
 	self.MovTypeProc[0] = function(self) 
 		if ( self.pseg_type_l == 1 ) then
 			self:PlaySequence( "jump_holding_land" )
-			--self:SayToOwner(self:EntIndex(), " landed")
+			--self:Debug(self:EntIndex(), " landed")
 		end
 	end
 	
-	self:SayToOwner(self:EntIndex(), " Initialization complete")
+	--self:Debug(self:EntIndex(), " Initialization complete")
 	
 	self:RunHook("Initialized")
 	
@@ -2302,15 +2457,23 @@ function ENT:DischargeBurst (enemy, count, path)
 	end	
 			
 	while ( count > 0 && IsValid(enemy) ) do	
-		self.loco:FaceTowards(enemy:GetPos() )
+	  local ep = enemy:GetPos()
+		self.loco:FaceTowards(ep )
 		
 		local av = self:CalculateEnemyHitpos(enemy, tbone)
 		
 		self:SetAimVector((av - self:GetAimOffset(enemy)) - self:GetShootPos()) 
-		self:AimAt(av)
+		
 				
-		self.Weapon:PrimaryAttack()
-				
+		if ( self:GetPos():Distance(ep) < 50 ) then
+		  self:AimAt(enemy:EyePos() )
+		  self:MeleeAttack(av, enemy)
+		  return true
+		else
+		  self:AimAt(av)
+		  self.Weapon:PrimaryAttack()
+		end
+		
 		count = count - 1
 		
 		coroutine.wait(0.06)
@@ -2379,6 +2542,14 @@ function ENT:EnemyVisible()
 	return self:GetEyeTrace(enemy) == enemy
 end
 
+function ENT:TargetVisible(ent)
+  if ( !IsValid(ent) ) then
+    return false
+  end
+  
+  return self:GetEyeTrace(ent) == ent
+end
+
 local function inrange3(vec, min, max)
         if vec[1] < min[1] then return false end
         if vec[2] < min[2] then return false end
@@ -2408,7 +2579,7 @@ function ENT:HandleStuck()
 	
 	if ( IsValid(ent) ) then
 		ent:Use(self, self, USE_TOGGLE, 0)
-		self:SayToOwner(self:EntIndex(), " stuck, using", ent)	
+		self:Debug(self:EntIndex(), " stuck, using", ent)	
 		ent.nixbot_last_used = os.time()
 		coroutine.wait(1.25)
 	end
@@ -2426,7 +2597,7 @@ function ENT:HandleStuck()
 	self.loco:ClearStuck()
 		
 	local cppos = self.path:GetPositionOnPath(self.path:GetCursorPosition())
-	
+			
 	if ( self.last_path_pos && 
 		inrange3(cppos, self.last_path_pos - Vector(50,50,50), self.last_path_pos + Vector(50,50,50) )
 		) then
@@ -2438,6 +2609,11 @@ function ENT:HandleStuck()
 		end
 	else
 		self.stuck_counter = 0
+	end
+	
+	if ( self:GetVelocity():Length2D() > 25 && 
+	     self.stuck_counter == 0 ) then
+	  return true
 	end
 	
 	self.last_path_pos = cppos
@@ -2457,7 +2633,7 @@ function ENT:ResolveStuck()
 	
 	if ( self.loco:IsStuck() ) then
 		
-		self:SayToOwner(self:EntIndex(), " stuck")
+		self:Debug(self:EntIndex(), " stuck")
 		
 		--self.loco:JumpAcrossGap( self:GetPos() + self:GetForward() * 250, self:GetPos())
 		
@@ -2496,7 +2672,7 @@ function ENT:Goto(loc, options)
 	options.maxage = options.maxage || 900
 
 	if ( !path:IsValid() ) then 
-		self:SayToOwner(self:EntIndex(), " goto: invalid path")
+		self:Debug(self:EntIndex(), " goto: invalid path")
 		return false 
 	end
 		
@@ -2509,7 +2685,7 @@ function ENT:Goto(loc, options)
 		end
 								
 		if ( self:Interrupt() && options.noint != true ) then
-			self:SayToOwner(self:EntIndex(), " interrupting patrol")
+			self:Debug(self:EntIndex(), " interrupting patrol")
 			break
 		end
 		
@@ -2593,11 +2769,12 @@ function ENT:Goto(loc, options)
 	return true
 end
 
+
 function ENT:SetFollowTarget(target)	
-	if ( IsValid(target) && 
+	if ( IsValid(target) && (target:IsPlayer() || target:IsNPC()) &&
 		((self:CPPIGetOwner() != target && 
-			self:GetRelationship(target) < NIXBOT_RELATION_FRIEND) ||
-			self:HaveEnemy() ) ) then
+			self:GetRelationship(target) < NIXBOT_RELATION_FRIEND) 
+			) ) then
 		return false
 	end
 	self.FollowTarget = target
@@ -2608,6 +2785,9 @@ end
 function ENT:GetFollowTarget()
 	return self.FollowTarget
 end
+
+ENT.GetRunSpeed = ENT.GetStatsRunspeed
+ENT.GetWalkSpeed = ENT.GetStatsWalkspeed
 
 function ENT:Follow (options)
   local target = self.FollowTarget
@@ -2644,7 +2824,7 @@ function ENT:Follow (options)
 				
 	local path = Path( "Follow" )
 	self.path = path
-	path:SetMinLookAheadDistance( options.lookahead or 1000 )
+	path:SetMinLookAheadDistance( options.lookahead or 650 )
 	path:SetGoalTolerance(  options.tolerance  )
 	
 	path:Compute(self, target:GetPos())
@@ -2652,6 +2832,9 @@ function ENT:Follow (options)
 	if ( !path:IsValid()  ) then
 		return
 	end
+	
+	local dtol = 50
+	local dstate = 500
 	
 	while ( path:IsValid() && 
 			!( options.attack && self:HaveEnemy() )  ) do
@@ -2667,7 +2850,7 @@ function ENT:Follow (options)
 					
 		if ( dist > 20000 ) then		
 			if ( RealTime() - target.nixbot_last_ping > 10 ) then
-				self:SayToOwner(self:EntIndex(), " target ", target, " lost")
+				self:Debug(self:EntIndex(), " target ", target, " lost")
 				return false
 			end
 			
@@ -2712,20 +2895,55 @@ function ENT:Follow (options)
 		path:Update(self)	
 		
 		local pseg = path:GetCurrentGoal()
+		local walk
 				
-		if ( dist > 500 ) then				
-			self:StartActivityE( self:GetAnimAct("Run"), self:GetStatsRunspeed(), self:GetStatsAccel() )	
-		else
-			self:StartActivityE( self:GetAnimAct("Walk"), self:GetStatsWalkspeed(), self:GetStatsAccel() )	
-			self.loco:FaceTowards(target:EyePos() )	
-			self:LookAt(target:EyePos())
-		end
-			
+		if ( math.abs(dstate - dist) > dtol ) then
+  		dstate = dist
+  		if ( dist > 500 ) then
+  			self:StartActivityE( self:GetAnimAct("Run"), math.Clamp(target:GetRunSpeed() , 0, self:GetStatsRunspeed()), self:GetStatsAccel() )	
+  		else
+  			self:StartActivityE( self:GetAnimAct("Walk"), math.Clamp( target:GetWalkSpeed() , 0, self:GetStatsWalkspeed()), self:GetStatsAccel() )	
+  			walk = true
+  		end	
+  	end	
+		
+		if ( walk ) then
+		  self.loco:FaceTowards(target:EyePos() ) 
+      self:LookAt(target:EyePos())
+    end
 		
 		coroutine.yield()
 	end	
 	
 	return true
+end
+
+function ENT:MeleeAttack(hitpos, target)
+  local tr = util.TraceLine { start = self:EyePos(), endpos = hitpos, mask = MASK_SOLID, filter = {self, self.Weapon} }
+    
+  if ( IsValid(tr.Entity) ) then
+    local atspeed = 1 - self:GetStatsAthletics()
+    self:PlaySequenceAndWaitE( "MeleeAttack01", atspeed, 0.5 )
+    
+    if ( self:GetPos():Distance(target:GetPos()) > 50 ) then
+      tr = util.TraceLine { start = self:EyePos(), endpos = hitpos, mask = MASK_SOLID, filter = {self, self.Weapon} }
+      
+      if ( !IsValid(tr.Entity) ) then
+        return
+      end
+    end
+    
+    local info = DamageInfo()
+    info:SetAttacker( self )
+    info:SetInflictor( self )
+    info:SetDamage( 42 ) 
+    info:SetDamageType( bit.bor( DMG_BULLET , DMG_NEVERGIB ) )  
+  
+    tr.Entity:DispatchTraceAttack( info, tr, tr.HitNormal )
+  
+    return true
+  end
+
 end
 
 function ENT:EngageEnemy( options )
@@ -2742,7 +2960,7 @@ function ENT:EngageEnemy( options )
 	path:Compute( self, self:GetEnemy():GetPos() - self:GetEnemy():OBBCenter()  )	
 
 	if ( !path:IsValid() ) then 
-		self:SayToOwner(self:EntIndex(), " invalid path")
+		self:Debug(self:EntIndex(), " invalid path")
 		return false 
 	end
 	
@@ -2757,7 +2975,7 @@ function ENT:EngageEnemy( options )
 	local session_attack_distance = base_attack_distance
 	local min_closein_dist = base_attack_distance / 4
 	
-	self.target_pos = self:GetEnemy():GetPos()
+	self.target_pos = self:GetEnemy():GetPos() - self:GetEnemy():OBBCenter()   
 	
 	local path_max_age = 0.4
 	
@@ -2806,13 +3024,17 @@ function ENT:EngageEnemy( options )
 		
 		if ( target_visible == true )then
 			self.target_last_seen = os.time()
-			self.target_pos = enemy:GetPos() - enemy:OBBCenter()			
+			self.target_pos = enemy:GetPos() - enemy:OBBCenter() 	
+			self:AimAt(self.target_pos)				
 		else
-						
+			
 			if ( self:CalculateCognitionScore(enemy ) 
 					> self:GetStatsAwareness()) then
 				self.target_last_seen = os.time()
-				self.target_pos = enemy:GetPos() - enemy:OBBCenter()				
+				self.target_pos = enemy:GetPos() - enemy:OBBCenter() 		
+				self:AimAt(self.target_pos) 
+			else
+			  self:AimAt(self:GetForward() * 400 )  	
 			end
 		end
 		
@@ -2826,7 +3048,7 @@ function ENT:EngageEnemy( options )
 							
 		if ( pseg ) then
 			if ( pseg.area:IsUnderwater() && !fseg.area:IsUnderwater() ) then
-				self:SayToOwner(self:EntIndex(), " wont go underwater")
+				self:Debug(self:EntIndex(), " wont go underwater")
 				self.target_pos = fseg.pos
 				path:Compute( self, self.target_pos )	
 				recompute_path = false
@@ -2870,10 +3092,10 @@ function ENT:EngageEnemy( options )
 				self:StartActivityE( self.attack_event_act, 0, 0 )
 			end
 			
-			self:LookAt(enemy:EyePos() )
+			self:AimAt(enemy:EyePos() )
 	
-			if ( os.time() - self.target_last_seen > 10) then				
-				self:SayToOwner(self:EntIndex(), " target escaped")
+			if ( os.time() - self.target_last_seen > 45) then				
+				self:Debug(self:EntIndex(), " target escaped")
 				self:SetEnemy( nil )
 				return false	
 			end
@@ -2889,7 +3111,7 @@ function ENT:EngageEnemy( options )
 				if ( !scoped && RollDice(15) ) then					
 					self:DischargeBurstNoAnim(enemy, math.random(unpack(self.BurstRC)), path) 	
 				else
-					self:LookAt(enemy:EyePos() )
+					self:AimAt(enemy:EyePos() )
 				end
 			end
 			
@@ -2908,15 +3130,19 @@ function ENT:EngageEnemy( options )
 		
 	self:SetMood(NIXBOT_MOOD_STIMULATED)
 	
+	
+	
 	if ( !self:HaveEnemy()) then
 		self:RunHook("LostEnemy", options)
-		self:SayToOwner(self:EntIndex(), " target gone")	
+		self:Debug(self:EntIndex(), " target gone")	
 		self:SetEnemy( nil )
 	elseif ( !path:IsValid() ) then
-		self:SayToOwner(self:EntIndex(), " invalid path")
+		self:Debug(self:EntIndex(), " invalid path")	
+		self:SetEnemy( nil )
 		return true, true
 	end
 
+  
 	--self:SetEnemy( NULL )
 	
 	return true
@@ -2925,11 +3151,13 @@ end
 util.AddNetworkString("NIXBOT.net.plyctl")
 
 local AllowedPCFunctions = {
-	["SetPatrol"] = true,
-	["SetInterrupt"] = true,
-	["SetFollowTarget"] = true,
+	["Patrol"] = true,
+	["Interrupt"] = true,
+	["FollowTarget"] = true,
 	["PPDensity"] = true,
-	["SetPPRebuild"] = true
+	["PPRebuild"] = true,
+	["EnableItemPickup"] = true,
+	["EnableSupplyAllies"] = true
 }
 
 net.Receive("NIXBOT.net.plyctl", function(len, ply)
@@ -2943,13 +3171,11 @@ net.Receive("NIXBOT.net.plyctl", function(len, ply)
 		return
 	end
 	
-	local fn = "Set"..t.n
-	
-	if ( !AllowedPCFunctions[fn] ) then
+	if ( !AllowedPCFunctions[t.n] ) then
 		return
 	end
-	
-	local fp = nb[fn]
+		
+	local fp = nb["Set"..t.n]
 		
 	if ( !isfunction(fp) ) then
 		return

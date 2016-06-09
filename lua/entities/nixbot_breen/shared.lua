@@ -21,7 +21,7 @@ ENT.Options = {
 		Awareness = 0.61,		
 		Athletics = 0.36,
 		Agility = 0.31,
-		Bravery = 0.84,
+		Courage = 0.84,
 		CommRange = 4000,	
 	}, AnimHit = {
 		"SWI_toDelivery"

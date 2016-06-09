@@ -12,7 +12,7 @@ include "sounds_female.lua"
 include "sounds_male.lua"
 
 hook.Add("EntityFireBullets", "NX.m.fb", function (ent, data)
-	if ( ent:IsPlayer() || ent:IsNPC() || ent.NixBot ) then
+	if ( ent:IsPlayer() || ent:IsNPC() || ent:IsNixBot() ) then
 		ent:SetNWFloat("LastShootTime", RealTime())		
 	elseif ( ent:IsWeapon() ) then
 		if ( IsValid(ent.Owner) ) then
@@ -22,6 +22,7 @@ hook.Add("EntityFireBullets", "NX.m.fb", function (ent, data)
 		end
 	end
 end)
+
 
 do
 
@@ -85,7 +86,7 @@ else
 		net.WriteTable(t)
 		net.SendToServer()
 	end
-
+	
 end
 
 function ENT:SetupDataTables()
@@ -95,5 +96,6 @@ function ENT:SetupDataTables()
 	self:NetworkVar( "Float", 0, "PPDensity" )
 	self:NetworkVar( "Bool", 1, "PickupItems" )
 	self:NetworkVar( "Bool", 2, "SupplyAllies" )
+	self:NetworkVar( "Bool", 3, "Retreating" )
 	
 end

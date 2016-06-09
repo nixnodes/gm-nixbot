@@ -80,7 +80,15 @@ ENT.DefaultSoundsFemale = {
 	OnDie = {
 		"nixbot_female_die_01",
 		"nixbot_female_die_02"
-	}
+	},
+	HealPlayer = {
+   "nixbot_female_health_01",
+   "nixbot_female_health_02",
+   "nixbot_female_health_03",
+   "nixbot_female_health_04",
+   "nixbot_female_health_05",
+   "nixbot_female_health_06"
+  }
 }
 
 sound.Add( {
@@ -527,4 +535,60 @@ sound.Add( {
 	level = 90,
 	pitch = { 95, 100 },
 	sound = Sound("vo/npc/female01/pain06.wav")
+} )
+
+
+
+sound.Add( {
+  name = "nixbot_female_health_01",
+  channel = CHAN_VOICE,
+  volume = 1.0,
+  level = 90,
+  pitch = { 95, 100 },
+  sound = Sound("vo/npc/female01/health01.wav")
+} )
+
+sound.Add( {
+  name = "nixbot_female_health_02",
+  channel = CHAN_VOICE,
+  volume = 1.0,
+  level = 90,
+  pitch = { 95, 100 },
+  sound = Sound("vo/npc/female01/health02.wav")
+} )
+
+sound.Add( {
+  name = "nixbot_female_health_03",
+  channel = CHAN_VOICE,
+  volume = 1.0,
+  level = 90,
+  pitch = { 95, 100 },
+  sound = Sound("vo/npc/female01/health03.wav")
+} )
+
+sound.Add( {
+  name = "nixbot_female_health_04",
+  channel = CHAN_VOICE,
+  volume = 1.0,
+  level = 90,
+  pitch = { 95, 100 },
+  sound = Sound("vo/npc/female01/health04.wav")
+} )
+
+sound.Add( {
+  name = "nixbot_female_health_05",
+  channel = CHAN_VOICE,
+  volume = 1.0,
+  level = 90,
+  pitch = { 95, 100 },
+  sound = Sound("vo/npc/female01/health05.wav")
+} )
+
+sound.Add( {
+  name = "nixbot_female_health_06",
+  channel = CHAN_VOICE,
+  volume = 1.0,
+  level = 90,
+  pitch = { 95, 100 },
+  sound = Sound("vo/npc/female01/health06.wav")
 } )

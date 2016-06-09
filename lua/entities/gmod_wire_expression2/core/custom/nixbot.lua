@@ -161,6 +161,12 @@ e2function entity entity:getEnemy()
 	return IsValid(enemy) && enemy || NULL
 end
 
+e2function entity entity:haveEnemy()
+  if ( !ValidateNixBot(self, this) ) then return 0 end
+    
+  return this:HaveEnemy() && 1 || 0
+end
+
 e2function number entity:setFollowTarget(entity target)
 	if ( !ValidateNixBot(self, this) ) then return 0 end
 	
@@ -191,7 +197,7 @@ e2function number entity:setRelationship(entity target, string disposition, numb
 	
 	if ( !disp || !isnumber(disp) ) then return 0 end		
 	
-	return SetRelationship(this, target, disp , prio)
+	return SetRelationship(this, target, disp , prio, 0)
 end
 
 e2function void entity:gotoPos(vector pos)
@@ -229,6 +235,12 @@ e2function void entity:setPPDensity(number density)
 	if ( !ValidateNixBot(self, this) ) then return 0 end
 	
 	this:SetPPDensity(density)
+end
+
+e2function void entity:assemblePatrolPoints()
+  if ( !ValidateNixBot(self, this) ) then return 0 end
+  
+  this:TriggerRemoteAPP()
 end
 
 

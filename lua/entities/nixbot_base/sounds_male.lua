@@ -14,7 +14,9 @@ ENT.DefaultSoundsMale = {
 		"nixbot_male_hurt_08",
 		"nixbot_male_hurt_09"
 	},
-	AlertDanger = {
+	Wounded = {
+	  
+	}, AlertDanger = {
 		"nixbot_male_alert_danger_01",
 		"nixbot_male_alert_danger_02"
 	},
@@ -80,6 +82,14 @@ ENT.DefaultSoundsMale = {
 	OnDie = {
 		"nixbot_male_die_01",
 		"nixbot_male_die_02"
+	},
+	HealPlayer = {
+	 "nixbot_male_health_01",
+	 "nixbot_male_health_02",
+	 "nixbot_male_health_03",
+	 "nixbot_male_health_04",
+	 "nixbot_male_health_05",
+	 "nixbot_male_health_06"
 	}
 }
 
@@ -520,10 +530,55 @@ sound.Add( {
 
 
 sound.Add( {
-	name = "nixbot_male_hurt_06",
-	channel = CHAN_VOICE,
-	volume = 1.0,
-	level = 90,
-	pitch = { 95, 100 },
-	sound = Sound("vo/npc/male01/pain06.wav")
+  name = "nixbot_male_health_01",
+  channel = CHAN_VOICE,
+  volume = 1.0,
+  level = 90,
+  pitch = { 95, 100 },
+  sound = Sound("vo/npc/male01/health01.wav")
+} )
+
+sound.Add( {
+  name = "nixbot_male_health_02",
+  channel = CHAN_VOICE,
+  volume = 1.0,
+  level = 90,
+  pitch = { 95, 100 },
+  sound = Sound("vo/npc/male01/health02.wav")
+} )
+
+sound.Add( {
+  name = "nixbot_male_health_03",
+  channel = CHAN_VOICE,
+  volume = 1.0,
+  level = 90,
+  pitch = { 95, 100 },
+  sound = Sound("vo/npc/male01/health03.wav")
+} )
+
+sound.Add( {
+  name = "nixbot_male_health_04",
+  channel = CHAN_VOICE,
+  volume = 1.0,
+  level = 90,
+  pitch = { 95, 100 },
+  sound = Sound("vo/npc/male01/health04.wav")
+} )
+
+sound.Add( {
+  name = "nixbot_male_health_05",
+  channel = CHAN_VOICE,
+  volume = 1.0,
+  level = 90,
+  pitch = { 95, 100 },
+  sound = Sound("vo/npc/male01/health05.wav")
+} )
+
+sound.Add( {
+  name = "nixbot_male_health_06",
+  channel = CHAN_VOICE,
+  volume = 1.0,
+  level = 90,
+  pitch = { 95, 100 },
+  sound = Sound("vo/npc/male01/health06.wav")
 } )

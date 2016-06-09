@@ -48,14 +48,14 @@ hook.Add( "PlayerSpawnNPC", "nixbot_spawn", function ( ply, npc_type, weapon )
 	end
 end )
 
-hook.Add( "PlayerSpawnedNPC", "NX.policy.spawned.npc", function ( ply, ent )
-	ply:AddCount(ent:GetClass(), ent)
-	if ( ent.NixBot ) then
-		ply:AddCount("nbs", ent)
+hook.Add( "PlayerSpawnedNPC", "nixbot_spawned", function ( ply, ent )	
+	if ( ent:IsNixBot() ) then
+		ply:AddCount("nbs", ent)		
+    ent:SetRelationship(ply, NIXBOT_RELATION_OWNER, 99)
 	end
 end )
 
-hook.Add( "PlayerCanPickupWeapon", "NX.m.disable_pickup", function( ply, wep )
+hook.Add( "PlayerCanPickupWeapon", "nixbot_disable_weap_pickup", function( ply, wep )
 	if ( wep.CanPickup == false ) then return false end
 end )
 
@@ -79,21 +79,20 @@ hook.Add("EntityTakeDamage", "nixbot_skill_gain", function(target, dmg)
 	end
 	
 	if ( target.NixBot ) then
-		--if ( attacker != target:CPPIGetOwner() ) then
-		target:SetRelationship(attacker, math.Clamp(target:GetRelationship(attacker) - (dmg:GetDamage() / 8), NIXBOT_RELATION_ARCH_ENEMY, NIXBOT_RELATION_OWNER ))
-		
-		--print ((1 - target:Health() / target:GetMaxHealth() ) ,  target:GetStatsBravery() ,  target:GetMaxHealth(), target:Health() )
-		
-		if ( (1 - target:Health() / target:GetMaxHealth() )  > target:GetStatsBravery() ) then
-			
-			target:AssignTask(target.Tasks, function(s) 
-				target:PlaySequenceAndWaitE( "fear_reaction" )
-				return true
-			end)
-			target:SetInterrupt()
+		target:SetRelationship(attacker, math.Clamp(target:GetRelationship(attacker) - (dmg:GetDamage() / 4), NIXBOT_RELATION_ARCH_ENEMY, NIXBOT_RELATION_OWNER ))
+				
+		if ( target:InDanger() ) then
+		  target:SetRelationship (attacker, NIXBOT_RELATION_FEAR)		
+		  if ( target:GetRetreating() ) then
+		    target:SetInterrupt("retreat")
+		    timer.Create("NIXBOT.retreat."..target:EntIndex(), 5, 1, function()
+		      if ( IsValid(target) && target:InDanger() ) then target:StrategicRetreat() end
+		    end)
+		  else   
+		    timer.Remove("NIXBOT.retreat."..target:EntIndex())
+        target:StrategicRetreat()			
+		  end
 		end
-		
-		--end
 	end
 	
 	if ( target:IsPlayer() || target:IsNPC() ) then
@@ -104,6 +103,58 @@ hook.Add("EntityTakeDamage", "nixbot_skill_gain", function(target, dmg)
 	end
 	
 end)
+
+function ENT:InDanger()
+  return (1 - self:Health() / self:GetMaxHealth() )  > self:GetStatsCourage()
+end
+
+
+function ENT:StrategicRetreat()
+  local pos = self:FindSpot( "far", {
+     type = "hiding",
+     pos = self:GetPos(),
+     radius = 16000
+  })
+  
+  if ( !pos ) then
+    return false
+  end
+      
+  self:SetEnemy(nil)
+  self:SetInterrupt()
+  self:SetInterrupt("combat")
+    
+  
+  self:AssignTask(self.PrioTasks, function(self)   
+     if ( self:GetRangeTo(pos) > 50 ) then  
+       print("goto", self)
+       self:SetRetreating(true)
+       local res1, res2 = self:Goto(pos,
+       {
+         noint = true, notask = true, force = true,
+         activity = self:GetAnimAct("Run"),
+         speed = self:GetStatsRunspeed() + 45,
+         tolerance = 35, attack = true,
+         cond = function(self) 
+           if ( self:Interrupt("retreat") || 
+                !self:InDanger() ) then return false end 
+         end
+       })
+     end
+     
+     self:SetEnemy(nil)
+     
+     if ( !self:InterruptClr("retreat") && res2 ) then
+       print("idle", self)   
+       self:PlaySequenceAndWaitE( "Fear_Reaction", nil , nil, 1)
+     end
+     
+     self:SetRetreating(false)
+     return true        
+  end, nil, "proc_retreat")
+
+  
+end
 
 local function ValidateEnemyDefault(self, enemy)
 	if ( self:GetRelationship(enemy) > NIXBOT_RELATION_ENEMY ) then
@@ -129,9 +180,11 @@ function ENT:Initialize()
 		
 	self:SetModel( self.Model )
 	
-	self:AddFlags( bit.bor( FL_NPC, FL_AIMTARGET, FL_OBJECT, FL_SWIM, FL_FLY, FL_STEPMOVEMENT )  )
+	--self:AddFlags( bit.bor( FL_NPC, FL_AIMTARGET, FL_OBJECT, FL_SWIM, FL_FLY, FL_STEPMOVEMENT )  )
 	
-	self:SetPPDensity(400)
+	self:SetPPDensity(1000)
+	
+	--self.PrintDebug = true
 
 	self.IsAlive = true
 	self.LastUsed = 0
@@ -145,7 +198,9 @@ function ENT:Initialize()
 	
 	self:SetBusyTimeout(0)
 	
+	self.Interrupts = {}
 	self.Tasks = {}
+	self.PrioTasks = {}
 	self.TimedCombatTasks = {}
 	self.TimedMovementTasks = {}
 	self.TimedTasks = {}
@@ -185,10 +240,10 @@ function ENT:Initialize()
 	self.Stats.AwarenessInv = math.Clamp(self.Options.Stats.Awareness, 0, 1)
 	self.Stats.Awareness = math.Clamp(1 - self.Options.Stats.Awareness, 0, 1)
 	 
-	self.Stats.RunSpeed = math.Round(self.Options.Stats.Athletics * 650)
+	self.Stats.RunSpeed = math.Round(self.Options.Stats.Athletics * 600)
 	self.Stats.WalkSpeed = math.Round(self.Stats.RunSpeed * 0.384)
-	self.Stats.Accel = AAAvg * 600
-	self.Stats.Decel = AAAvg * 400
+	self.Stats.Accel = AAAvg * 400
+	self.Stats.Decel = AAAvg * 800
 	
 	self.Stats.ReloadSpeed = self.Options.Stats.Athletics * 4.0
 	
@@ -251,7 +306,12 @@ function ENT:Initialize()
 	self.Hooks = NIXBOT.hook:CreateContext()
 	
 	self:InitializePhysics()
+	
+	if ( self.PostInit ) then
+	  self:PostInit()
+	end
 end
+
 
 function ENT:InitializePhysics()
   self:PhysicsInitShadow(true, true)
@@ -397,8 +457,8 @@ function ENT:GetStatsAccel()
 	return self.Stats.Accel
 end 
 
-function ENT:GetStatsBravery()
-	return self.Options.Stats.Bravery
+function ENT:GetStatsCourage()
+	return self.Options.Stats.Courage
 end 
 
 function ENT:GetStatsAthletics()
@@ -559,10 +619,11 @@ function ENT:EquipWeapon(weap)
 	if ( ht == "ar2" ) then
 		self.AimAngleOffset = Angle(0,8,0)		
 		self.AnimSeq.Reload = "reload_smg1"	
-		
+		self.CurrentShootSeq = "shoot_ar2"
 	else
 		self.AimAngleOffset = Angle(0,-8,0)
 		self.AnimSeq.Reload = "reloadpistol"
+		self.CurrentShootSeq = "shootp1"
 	end
 	
 	function weap:TranslateActivity( act )
@@ -796,8 +857,18 @@ function RollDice(chance)
 	return math.Rand(0, 100) <= chance
 end
 
-function ENT:AssignTask(tab, func, args)
-	table.insert(tab, {func = func, data = args || {} })
+function ENT:AssignTask(tab, func, args, id)
+  local t = {func = func, data = args || {}, id = id }
+		
+	if ( id ) then	  	  
+    for _,v in ipairs(tab) do
+      if ( v.id == id ) then
+        tab[_] = t
+        return
+      end
+    end
+  end
+	table.insert(tab, t)
 end
 
 function ENT:AssignTimedTask(id, tab, i, args)
@@ -815,7 +886,7 @@ end
 function ENT:ProcessTimedTasks(tab, path)
 	local c
 	for _,t in pairs(tab) do		
-		if ( os.time() - t.last < t.interval  ) then
+		if ( RealTime() - t.last < t.interval  ) then
 			continue 
 		end
 						
@@ -830,7 +901,7 @@ function ENT:ProcessTimedTasks(tab, path)
 				table.remove(tab, _)	
 			end
 		else
-			t.last = os.time()
+			t.last = RealTime()
 		end
 	end
 	return c || false
@@ -839,15 +910,20 @@ end
 
 function ENT:ProcessTask(tab)
 
-	local t = tab[1]
-		
+  if ( 0 == #tab ) then return false end 
+  local ret = false
+  
+  for _,t in ipairs(table.Copy(tab)) do
 
-	local ret, r2 = t.func(self, unpack(t.data))
-	
-	
-	if ( ret == true ) then
-		table.remove(tab, 1)	
-	end
+    table.remove(tab, _) 
+    
+  	local r, r2 = t.func(self, unpack(t.data))
+  	
+  	if ( r == true ) then
+  	  ret = r  	  
+  	end
+
+  end
 	
 	return ret
 end
@@ -940,16 +1016,13 @@ function ENT:SetEyeAngles()
 	
 end
 
-function ENT:Interrupt(n)	
-	
+function ENT:Interrupt(n)		
 	if ( n ) then
-		if ( self["Interrupt"..n] == true) then
-			--self["Interrupt"..n]  = false
+		if ( self.Interrupts[n] == true) then
 			return true
 		end
 	else
 		if ( self.InterruptF == true ) then
-			--self.InterruptF = false		
 			return true
 		end	
 	end
@@ -959,10 +1032,15 @@ end
 
 function ENT:ClearInterrupt(n)
 	if ( n ) then
-		self["Interrupt"..n]  = false
+		self.Interrupts[n]  = false
 	else
 		self.InterruptF = false
 	end	
+end
+
+function ENT:ClearInterrupts(n)
+  self.InterruptF = false
+  self.Interrupts = {}  
 end
 
 function ENT:InterruptClr(n)	
@@ -975,7 +1053,7 @@ end
 
 function ENT:SetInterrupt(n)
 	if ( n ) then
-		self["Interrupt"..n]  = true
+		self.Interrupts[n]  = true
 	else
 		self.InterruptF = true
 	end	
@@ -1063,6 +1141,26 @@ function ENT:ScanEntAttackingFriend(v)
 	
 end
 
+function ENT:IsInCone(pos, cone_origin, cone_direction, cone_radius, cone_angle)
+
+  if ( cone_origin:Distance(pos) > cone_radius ) then
+    return false
+  end
+  
+  local cos = math.cos(cone_angle)
+  
+  cone_direction:Normalize()
+  local dir = pos - cone_origin
+  
+  dir:Normalize()
+  local dot = cone_direction:Dot(dir)
+
+  if (dot > cos) then
+    return true
+  end
+  
+  return false
+end
 
 function ENT:FindInCone(cone_origin, cone_direction, cone_radius, cone_angle)
 	local entities = ents.FindInSphere(cone_origin, cone_radius)
@@ -1090,6 +1188,16 @@ function ENT:FindInCone(cone_origin, cone_direction, cone_radius, cone_angle)
 	return result, entities
 end
 
+function ENT:GotoDoTrackTarget(lset, data) 
+  if ( !IsValid(data.ent) ) then
+    return false
+  end
+  lset.pos = data.ent:GetPos()
+  if ( self.path:GetAge() > 1 ) then
+    self.path:Compute(self, lset.pos)
+    self.path:Update(self)
+  end
+end
 
 function ENT:SupplyAllies()
   local _ents = ents.FindInSphere(self:GetPos(), 1000)
@@ -1134,24 +1242,29 @@ function ENT:SupplyAllies()
   if ( !cres.ent || 0 == table.Count(delivery_list) ) then
     return true
   end
-  
-  
+    
   self:Goto(cres.ent:GetPos(), 
-            { 
-              notask = true, maxage = 120,
-              activity = self:GetAnimAct("Run"),
-              speed = self:GetStatsRunspeed(),
-              accel = self:GetStatsAccel(),
-              tolerance = 100
-            })
+    { 
+      notask = true, maxage = 120,
+      activity = self:GetAnimAct("Run"),
+      speed = self:GetStatsRunspeed(),
+      accel = self:GetStatsAccel(),
+      tolerance = 100,
+      cond = self.GotoDoTrackTarget,
+      cond_data = { ent = cres.ent }
+    })
             
   if ( !IsValid(cres.ent) || 
         self:GetPos():Distance(cres.ent:GetPos()) > 100 ) then
       return true
   end 
+    
   
   for t,v in pairs(delivery_list) do
-    v.num = math.Clamp(math.Round((cres.ent:GetMaxHealth() - cres.ent:Health()) / 25), 0, self:GetItemCount(t,v.class) / 1.75 )
+    if ( v.class == "item_healthkit" ) then
+      v.num = math.Clamp(math.Round((cres.ent:GetMaxHealth() - cres.ent:Health()) / 25), 0, self:GetItemCount(t,v.class) / 1.75 )
+      self:PlaySound("HealPlayer", 5)
+    end
     self:Debug(self:EntIndex().."dropping ", t, v.class, v.num, cres.ent)
     self:DropItem(t, v.class, cres.ent:GetPos() + VectorRand() * 7, v.num)
   end
@@ -1168,22 +1281,21 @@ function ENT:DetectEnemyInView()
 
 	local cres = {
 		distance = 0,
-		score = -0xFFFFFF,
+		score = 0xFFFFFF,
 		ent = nil,		
 		ally_disp = 0,
 		ent_ally = nil
 	}
 		
 	for k, v in ipairs( _ents ) do
-		if ( !IsValid(v) || !self:Visible(v) ||
-		      v == self:GetEnemy() ) then
+		if ( !IsValid(v) || !self:Visible(v)  ) then
 			continue
 		end
 		
 		if ( !self:IsEntityValidTarget(v) ) then			
 			continue
 		end
-		
+						
 		self:ScanEntAttackingFriend(v)
 		
 		local distance = self:GetPos():Distance(v:GetPos())
@@ -1200,9 +1312,9 @@ function ENT:DetectEnemyInView()
 			continue
 		end		
 				
-		local score = disp * (100/distance)
-						
-		if ( score > cres.score) then
+		local score = (1/(distance/(disp*(math.abs(disp)+1))) )
+		
+		if ( score < cres.score) then
 			cres.score = score
 			cres.ent = v
 		end
@@ -1226,14 +1338,14 @@ function ENT:DetectEnemyCog()
 	local _ents = ents.FindInSphere( self:EyePos(), self:GetStatsCogRange())
 	
 	local cres = {
-		score = -0xFFFFFF,
+		score = 0xFFFFFF,
 		ent = nil, 
 		disp = 0,
 		distance = 0
 	}
 
 	for k, v in ipairs( _ents ) do
-		if ( !IsValid(v) || v == self:GetEnemy() ) then
+		if ( !IsValid(v) ) then
 			continue
 		end
 		
@@ -1256,12 +1368,9 @@ function ENT:DetectEnemyCog()
 			continue
 		end
 		
-		local distance = self:GetPos():Distance(v:GetPos())
-			
-		local score = (disp * (100/distance)) * cogscore
+		local score = (disp * (1/cogscore) )
 		
-		
-		if ( score > cres.score ) then
+		if ( score < cres.score ) then
 			cres.ent = v
 			cres.score = score
 		end		
@@ -1318,6 +1427,21 @@ function ENT:GetBusyTimeout()
 	return self.busy_timeout
 end
 
+function ENT:Heal()
+  local dh = self:GetMaxHealth() - self:Health() 
+    
+  if ( dh >= 25 ) then      
+    local use = self:PopItem("Entity", "item_healthkit", math.Round(dh / 25) ) 
+    if ( use ) then
+      timer.Simple(1 - self.Options.Stats.Agility, function()
+        if ( IsValid(self) ) then
+          self:SetHealth(math.Clamp(self:Health() + use*25,0,self:GetMaxHealth()) )
+        end
+      end)
+    end
+  end
+end
+
 function ENT:OnInjured(dmginfo)
 	if ( self.l_inj_event && RealTime() - self.l_inj_event < 1 ) then
 		return
@@ -1348,18 +1472,7 @@ function ENT:OnInjured(dmginfo)
 	end)
 	
 	if (  self:Health() - dmginfo:GetDamage() > 0 ) then
-		local dh = self:GetMaxHealth() - self:Health() 
-		
-		if ( dh >= 25 ) then			
-			local use = self:PopItem("Entity", "item_healthkit", math.Round(dh / 25) ) 
-			if ( use ) then
-				timer.Simple(1 - self.Options.Stats.Agility, function()
-					if ( IsValid(self) ) then
-						self:SetHealth(math.Clamp(self:Health() + use*25,0,self:GetMaxHealth()) )
-					end
-				end)
-			end
-		end
+		self:Heal()
 		self:PlaySound("Hurt")		
 	end
 		
@@ -1470,9 +1583,10 @@ function ENT:DoReload()
 	return true
 end
 
-function ENT:PlaySequenceAndWait( name, speed, dm )
+function ENT:PlaySequenceAndWait( name, speed, dm, len )
+  local l = self:SetSequence( name )
 
-  local len = self:SetSequence( name )
+  len = len && len || l
   speed = speed or 1
 
   self:ResetSequenceInfo()
@@ -1486,8 +1600,8 @@ function ENT:PlaySequenceAndWait( name, speed, dm )
   end
 end
 
-function ENT:PlaySequenceAndWaitE( name, speed, dm )
-	self:PlaySequenceAndWait( name, speed, dm )
+function ENT:PlaySequenceAndWaitE( name, speed, dm, len )
+	self:PlaySequenceAndWait( name, speed, dm, len )
 	self.CurrentActivity = nil
 end
 
@@ -1600,20 +1714,22 @@ function ENT:ComputeNavPoint(area_start, area_size)
 	return false
 end
 
-function ENT:SetPPRebuild(v)
-	
-	self:SetPPDensity(v)
-	
-	if ( self.AssemblyInProgress == true ) then
-		self:SetInterrupt("asmpp")
-	end
-	
-	self:AssignTimedTaskH("AssemblePatrolPoints"..tostring(SysTime())..tostring(v), self.TimedTasks, function(s)
+function ENT:TriggerRemoteAPP()
+  if ( self.AssemblyInProgress == true ) then
+    self:SetInterrupt("asmpp")
+  end
+  
+  self:AssignTimedTaskH("AssemblePatrolPoints"..tostring(SysTime())..tostring(v), self.TimedTasks, function(s)
 
-		s:AssemblePatrolPoints()
-		
-		return false
-	end, 0)
+    s:AssemblePatrolPoints()
+    
+    return false
+  end, 0)
+end
+
+function ENT:SetPPRebuild(v)	
+	self:SetPPDensity(v)
+	self:TriggerRemoteAPP()	
 end
 
 function ENT:LoadPatrolArea()
@@ -1641,7 +1757,7 @@ function ENT:AssemblePatrolPoints()
 	
 	self.AssemblyInProgress = true
 	
-	self:Debug(self:EntIndex(), " Generating patrol points.." )
+	self:SayToOwner(self:EntIndex(), " Generating patrol points.." )
 	
 	self.PatrolPoints = {}
 	
@@ -1664,7 +1780,7 @@ function ENT:AssemblePatrolPoints()
 		coroutine.yield()
 	end
 	
-	self:Debug(self:EntIndex(), " "..#self.PatrolPoints.." patrol points found" )
+	self:SayToOwner(self:EntIndex(), " "..#self.PatrolPoints.." patrol points found" )
 
 	self:InterruptClr("asmpp")
 	
@@ -1859,8 +1975,8 @@ function ENT:Main()
 			local nodelay = false
 			local noactreset = false
 			
-			while ( true ) do
-				self.InterruptF = false
+			while ( true ) do		
+				self:ClearInterrupts()
 				
 				--self:UpdateRanks()								
 				if ( IsValid(self.Weapon) && 
@@ -1870,10 +1986,11 @@ function ENT:Main()
 								
 				local wto = 2
 				
+				self:ProcessTask(self.PrioTasks)   
+				
 				if ( self:HaveEnemy()  ) then
-
 					self.loco:FaceTowards( self:GetEnemy():GetPos() )	
-					self:StartActivityE( self:GetAnimAct("RunChase"), self:GetStatsAccel(), self:GetStatsRunspeed() )								
+					self:StartActivityE( self:GetAnimAct("RunChase"), self:GetStatsRunspeed(), self:GetStatsAccel() )								
 					self.EvadeProximityDistance = 30
 					
 					self:AlertNeighbors( self:GetEnemy() )								
@@ -2093,6 +2210,8 @@ function ENT:PickupItem(item)
 	elseif ( type(item) == "Entity" ) then
 		if (item.AmmoType) then
 			self:GiveAmmo(item.AmmoAmount || item.AmmoMax || 10, item.AmmoType)
+		elseif ( item:GetClass() == "item_healthkit" ) then
+		  self:Heal()
 		end
 	else
 		self:RunHook("PickupItem", item)
@@ -2181,9 +2300,87 @@ end
 
 ENT.SetEnableSupplyAllies = ENT.EnableSupplyAllies
 
+function ENT:FlankEnemy()  
+  if ( !RollDice(25) ) then
+    return
+  end
+
+  if ( !self:HaveEnemy() || !self:EnemyVisible() ) then
+    return
+  end
+  
+  local enemy = self:GetEnemy()
+  
+  if ( !self:VisibleToTarget(enemy) ) then
+    return
+  end
+    
+  local pos = enemy:GetPos() + enemy:OBBCenter()  
+  local dist = self:GetPos():Distance(pos)
+  
+  if ( dist > self:GetStatsTFRange() ) then
+    return
+  end
+  
+  local srand = ((math.random(1,2)*2)-3)
+  
+  local pos1 = pos + enemy:GetRight() * (dist * srand)
+  
+  if ( !util.IsInWorld(pos1) ) then
+    return
+  end
+       
+  local opts = {
+     notask = true, maxage = 6, 
+     force = true, attack = true,
+     tolerance = 75,
+     activity = self:GetAnimAct("RunChase"),
+     speed = self:GetStatsRunspeed(),
+     accel = self:GetStatsAccel(),
+     cond = function(self) 
+       if ( !self:HaveEnemy() ) then
+         return false
+       end
+       
+       local pseg = self.path:GetCurrentGoal()
+       
+       if ( !pseg ) then
+         return 
+       end
+       
+       if ( pseg.distanceFromStart > dist * 2 ) then   
+         return false
+       end
+     end
+   }
+  
+  local r1, r2 = self:Goto(pos1, table.Copy(opts))
+  
+  if ( r2 ) then
+    pos = enemy:GetPos() + enemy:OBBCenter()
+    dist = self:GetPos():Distance(pos)
+  
+    if ( dist > self:GetStatsTFRange() ) then
+      return
+    end
+    
+    pos1 = pos + -enemy:GetForward() * dist 
+  
+    if ( !util.IsInWorld(pos1) ) then
+      return
+    end
+  
+    self:Goto(pos1, table.Copy(opts))
+  end
+  
+  
+  return
+  
+end
+
 function ENT:RunBehaviour()
-	
-	--MovementDiscovery(self, "walk")
+
+	--MovementDiscovery(self, "shoot")
 	--[[local a = "jump"
 	for k, v in pairs(TD) do
 	
@@ -2204,7 +2401,6 @@ function ENT:RunBehaviour()
 		table.insert(owner.nixbot_refs, self)
 	end]]
 		
-	self:SetRelationship(self:CPPIGetOwner(), NIXBOT_RELATION_OWNER, 99)
 	
 	self.loco:SetJumpHeight((self.Options.Stats.Athletics + self.Options.Stats.Agility / 8) * 255)
 				
@@ -2212,6 +2408,7 @@ function ENT:RunBehaviour()
 	self:AssignTimedTask("AutoEvade", self.TimedCombatTasks, 0.2)
 	self:AssignTimedTask("UpdateRanks", self.TimedCombatTasks, 2)
 	self:AssignTimedTask("DecreaseEnemyTensionsStep", self.TimedCombatTasks, 5)
+	self:AssignTimedTask("FlankEnemy", self.TimedCombatTasks, 10)
 	
 	self:AssignTimedTask("AutoEvade", self.TimedMovementTasks, 0.2)
 	self:AssignTimedTask("UpdateRanks", self.TimedMovementTasks, 2)
@@ -2278,12 +2475,8 @@ local function DoTrace(f, s, d, c)
 end
 
 function ENT:DoAttackEvent()
-	if ( self.attack_event_act ) then
-		local pact = self.CurrentActivity
-		self.CurrentActivity = nil
-		self:StartActivity( self.attack_event_act, 0, 0 )
-		self.CurrentActivity = pact
-	end	
+	self:PlaySequence(self.CurrentShootSeq, 1, true)		
+	self.CurrentActivity = nil
 end
 
 function ENT:GetActiveWeapon()
@@ -2387,30 +2580,29 @@ function ENT:LookAt(ep)
 	--self:InvalidateBoneCache()	
 end
 
-function ENT:DischargeBurstNoAnim(...)
-	local pa_ev = self.attack_event_act
-	self.attack_event_act = nil					
-	self:DischargeBurst(...) 				
-	self.attack_event_act = pa_ev
+function ENT:DischargeBurstNoAnim(...)				
+	return self:DischargeBurst(...) 				
 end
 
 function ENT:DischargeBurst (enemy, count, path)
 
 	if ( !IsValid(self.Weapon) || os.time() - self.LastBurst < math.Rand(0.5,2)  ) then
-		self:LookAt( self.last_bone && self:CalculateEnemyHitpos(enemy, self.last_bone) || GetTargetHitPosAbs(enemy))
+		self:AimAt(self.last_bone && self:CalculateEnemyHitpos(enemy, self.last_bone) || self:GetPos() + self:GetForward() * 400 )  
 		return false
 	end
 	
 	if ( self.Weapon:Clip1() == 0 ) then
 		self:DoReload()
-		if ( !IsValid(enemy) ) then
+		if ( !IsValid(enemy) ) then		
+		  self:AimAt(self:GetPos() + self:GetForward() * 400 )    
 			return false
 		end
 	end
 	
 	local tbone = GetRandomHitboxBone(enemy)			
 
-	if ( !tbone ) then
+	if ( !tbone ) then	 
+	  self:AimAt(self.last_bone && self:CalculateEnemyHitpos(enemy, self.last_bone) || self:GetPos() + self:GetForward() * 400 )   
 		return false
 	end
 	
@@ -2463,14 +2655,12 @@ function ENT:DischargeBurst (enemy, count, path)
 		local av = self:CalculateEnemyHitpos(enemy, tbone)
 		
 		self:SetAimVector((av - self:GetAimOffset(enemy)) - self:GetShootPos()) 
+		self:AimAt(av)
 		
-				
 		if ( self:GetPos():Distance(ep) < 50 ) then
-		  self:AimAt(enemy:EyePos() )
 		  self:MeleeAttack(av, enemy)
 		  return true
-		else
-		  self:AimAt(av)
+		else		  
 		  self.Weapon:PrimaryAttack()
 		end
 		
@@ -2526,7 +2716,7 @@ function ENT:GetEyeTrace(target)
 	local tr = util.TraceLine( {
 		start = self:EyePos() + (self:GetForward() * 10),
 		endpos = target:GetPos() + target:OBBCenter(),
-		filter = function(ent) if (	ent != target && (ent:IsWeapon() || ent:IsPlayer() || ent:IsNPC() ) ) then return false else return true end end
+		filter = function(ent) if ( ent != target && (ent:GetParent() == self || ent:IsNPC() || ent:IsPlayer())	) then return false else return true end end
 	} )
 	
 	return tr.Entity
@@ -2539,15 +2729,27 @@ function ENT:EnemyVisible()
 		return false
 	end
 	
-	return self:GetEyeTrace(enemy) == enemy
+	return self:TargetVisible(enemy)
 end
 
 function ENT:TargetVisible(ent)
-  if ( !IsValid(ent) ) then
+  if ( !self:IsInCone( ent:GetPos() + ent:OBBCenter(), self:EyePos(), self:EyeAngles():Forward(), self:GetStatsVisRange(), 1.396263402) ) then
     return false
   end
   
   return self:GetEyeTrace(ent) == ent
+end
+
+function ENT:VisibleToTarget(ent)
+  local range
+  
+  if ( ent:IsNixBot() ) then
+    range = ent:GetStatsVisRange()
+  else
+    range = 5000
+  end
+  
+  return self:IsInCone( self:GetPos() + self:OBBCenter(), ent:EyePos(), ent:EyeAngles():Forward(), range, 1.396263402)
 end
 
 local function inrange3(vec, min, max)
@@ -2654,10 +2856,12 @@ end
 function ENT:Goto(loc, options)
 	local options = options or {}
 
+  options.speed = options.speed or self:GetStatsWalkspeed()
+	options.accel = options.accel or self:GetStatsAccel()
 	
 	local actopts = {options.activity or self:GetAnimAct("Walk"), 
-							options.speed or self:GetStatsWalkspeed(), 
-							options.accel or self:GetStatsAccel() }
+							options.speed, 
+							options.accel  }
 								
 	--self.CurrentActivity = nil
 	
@@ -2675,6 +2879,10 @@ function ENT:Goto(loc, options)
 		self:Debug(self:EntIndex(), " goto: invalid path")
 		return false 
 	end
+	
+	local lset = {
+	   loc = loc
+	}
 		
 	local fseg = path:FirstSegment()
 		
@@ -2689,7 +2897,7 @@ function ENT:Goto(loc, options)
 			break
 		end
 		
-		if ( options.cond && options.cond(self) == false ) then
+		if ( options.cond && options.cond(self, lset, options.cond_data) == false ) then
 			break
 		end
 		
@@ -2702,7 +2910,7 @@ function ENT:Goto(loc, options)
 			if ( self:ProcessTimedTasks(self.TimedMovementTasks, path) ) then	
 								
 				if ( !path:IsValid() ) then		
-					path:Compute(self, loc)
+					path:Compute(self, lset.loc)
 					coroutine.yield()
 					continue
 				end
@@ -2716,7 +2924,7 @@ function ENT:Goto(loc, options)
 		
 		if ( pseg) then
 			if ( pseg.area:IsUnderwater() && !fseg.area:IsUnderwater() ) then
-				self:ComputePath(path, loc)
+				self:ComputePath(path, lset.loc)
 				coroutine.wait(1)
 				continue
 			end
@@ -2734,36 +2942,40 @@ function ENT:Goto(loc, options)
 			if ( options.persist != true ) then
 				return true
 			else
-				path:Compute(self, loc)
+				path:Compute(self, lset.loc)
 			end
 		end
 				
 		--[[if ( path:GetAge() > 10 ) then
 			path:Compute(self, loc)
 		end]]
-				
-		self:StartActivityE( unpack(actopts) )
-		
-		self:LookIdle()
-		
-		path:Update( self )
+		path:Update( self )   
 		
 		if ( options.attack && self:HaveEnemy() &&
 				self:GetRangeTo( self:GetEnemy():GetPos()  ) < self:GetStatsTFRange() &&
 				self:EnemyVisible()) then 
 			
+			self:StartActivityE( self:GetAnimAct("RunChase"), options.speed, options.accel )
 			local enemy = self:GetEnemy()
 			self.loco:FaceTowards(enemy:GetPos())	
-			self:DischargeBurstNoAnim(enemy, math.random(unpack(self.BurstRC)), path)
+			if ( self:DischargeBurstNoAnim(enemy, math.random(unpack(self.BurstRC)), path) == false ) then
+			  self:AimAt(self:GetPos() + self:GetForward() * 400 ) 
+			end
+		else
+		  self:StartActivityE( unpack(actopts) )
+		  self:LookIdle()
 		end
+		
+	
 			
 		coroutine.yield()
 	end	
-	
-	if ( self:GetRangeTo( loc ) <= options.tolerance + 25 ) then
+		
+	if ( self:GetRangeTo( lset.loc ) <= options.tolerance + 25 ) then
 		self:RunHook("GotoArrived", options)
+		return true, true
 	else
-		self:RunHook("GotoFailed", options)
+		self:RunHook("GotoFailed", options)		
 	end
 	
 	return true
@@ -2772,9 +2984,8 @@ end
 
 function ENT:SetFollowTarget(target)	
 	if ( IsValid(target) && (target:IsPlayer() || target:IsNPC()) &&
-		((self:CPPIGetOwner() != target && 
-			self:GetRelationship(target) < NIXBOT_RELATION_FRIEND) 
-			) ) then
+		(self:GetRelationship(target) < NIXBOT_RELATION_FRIEND) 
+			) then
 		return false
 	end
 	self.FollowTarget = target
@@ -2807,7 +3018,7 @@ function ENT:Follow (options)
 	if ( self:GetPos():Distance(target:GetPos()) < options.tolerance ) then
 		if ( !self.follow_idle_time ) then
 			self.follow_idle_time = os.time()
-			self.follow_idle_timeout = math.random(75,120)
+			self.follow_idle_timeout = math.random(160,240)
 		end
 				
 		if ( os.time() - self.follow_idle_time > self.follow_idle_timeout ) then
@@ -2959,23 +3170,19 @@ function ENT:EngageEnemy( options )
 	path:SetGoalTolerance( 25 )
 	path:Compute( self, self:GetEnemy():GetPos() - self:GetEnemy():OBBCenter()  )	
 
-	if ( !path:IsValid() ) then 
-		self:Debug(self:EntIndex(), " invalid path")
-		return false 
-	end
-	
 	self.target_last_seen = os.time()
 	
 	local tlost_c = 0
 	local times_attacked = 0
 	
 	local base_attack_distance = math.Round(self:GetStatsTFRange() * 
-			(( (self:GetEnemy():OBBMaxs() - self:GetEnemy():OBBMins()):LengthSqr() / 5625) ^ 1.4))
+			(( (self:GetEnemy():OBBMaxs() - self:GetEnemy():OBBMins()):LengthSqr() / 5625) ^ 1.5))
 	
 	local session_attack_distance = base_attack_distance
 	local min_closein_dist = base_attack_distance / 4
 	
-	self.target_pos = self:GetEnemy():GetPos() - self:GetEnemy():OBBCenter()   
+	self.target_pos = self:GetEnemy():GetPos() 
+	self:AimAt(self:GetPos() + self:GetForward() * 400 )  
 	
 	local path_max_age = 0.4
 	
@@ -2987,7 +3194,8 @@ function ENT:EngageEnemy( options )
 	
 	local last_enemy = enemy
 	
-	while ( path:IsValid() && self:HaveEnemy() ) do
+	while ( path:IsValid() && self:HaveEnemy() && 
+	        !self:Interrupt("combat") ) do
 	
 		if ( self:GetBusyTimeout() > RealTime() ) then
 			coroutine.yield()
@@ -2997,15 +3205,8 @@ function ENT:EngageEnemy( options )
 		if ( self:ProcessTimedTasks(self.TimedCombatTasks, path) ) then
 			self.path = path
 			
-			--[[if  (!path:IsValid()) then
-				path:Compute( self, loc )	
-				coroutine.yield()
-				continue
-			end]]
-			
-			if (!self:HaveEnemy()) then
-				self:SetEnemy( nil )
-				return false	
+			if (!self:HaveEnemy()) then			
+				break
 			end
 		end
 		
@@ -3024,17 +3225,15 @@ function ENT:EngageEnemy( options )
 		
 		if ( target_visible == true )then
 			self.target_last_seen = os.time()
-			self.target_pos = enemy:GetPos() - enemy:OBBCenter() 	
-			self:AimAt(self.target_pos)				
+			self.target_pos = enemy:GetPos() 
+			--self:AimAt(self.target_pos)				
 		else
 			
 			if ( self:CalculateCognitionScore(enemy ) 
 					> self:GetStatsAwareness()) then
 				self.target_last_seen = os.time()
-				self.target_pos = enemy:GetPos() - enemy:OBBCenter() 		
-				self:AimAt(self.target_pos) 
-			else
-			  self:AimAt(self:GetForward() * 400 )  	
+				self.target_pos = enemy:GetPos() 	
+				--self:AimAt(self.target_pos) 				
 			end
 		end
 		
@@ -3083,39 +3282,45 @@ function ENT:EngageEnemy( options )
 			
 			if ( self:DischargeBurst(enemy,math.random(unpack(self.BurstRC))) == true ) then
 				times_attacked = times_attacked + 1			
+			else
+			  
 			end	
 			
 		elseif ( target_visible == false ) then
 			if ( dist > 25 ) then
-				self:StartActivityE( self:GetAnimAct("RunChase"), self:GetStatsAccel(), self:GetStatsRunspeed() )		
+				self:StartActivityE( self:GetAnimAct("RunChase"), self:GetStatsRunspeed(), self:GetStatsAccel() )		
 			else
 				self:StartActivityE( self.attack_event_act, 0, 0 )
 			end
 			
-			self:AimAt(enemy:EyePos() )
+			self:AimAt(self:GetPos() + self:GetForward() * 400 )  
 	
-			if ( os.time() - self.target_last_seen > 45) then				
+			if ( os.time() - self.target_last_seen > 45) then		
 				self:Debug(self:EntIndex(), " target escaped")
-				self:SetEnemy( nil )
-				return false	
+				break
 			end
 		elseif ( dist >= min_closein_dist ) then
-			self.loco:FaceTowards(enemy:GetPos() )	
+			
 			local scoped = self:GetActiveWeapon():IsScoped()
 			
-			if ( dist < base_attack_distance && !scoped ) then					
+			if ( dist < base_attack_distance && !scoped ) then			
+			  self.loco:FaceTowards(enemy:GetPos() ) 		
 				self:StartActivityE(self:GetAnimAct("WalkAim"), 75, self:GetStatsAccel())			
 				self:DischargeBurstNoAnim(enemy, math.random(unpack(self.BurstRC)), path) 				
 			else
-				self:StartActivityE( self:GetAnimAct("RunChase"), self:GetStatsAccel(), self:GetStatsRunspeed() )			
-				if ( !scoped && RollDice(15) ) then					
-					self:DischargeBurstNoAnim(enemy, math.random(unpack(self.BurstRC)), path) 	
+				self:StartActivityE( self:GetAnimAct("RunChase"), self:GetStatsRunspeed(), self:GetStatsAccel())			
+				if ( dist < 4000 && !scoped && RollDice(5) ) then			
+				  self.loco:FaceTowards(enemy:GetPos() ) 		
+					if ( self:DischargeBurstNoAnim(enemy, math.random(unpack(self.BurstRC)), path) == false ) then
+              
+          end
 				else
-					self:AimAt(enemy:EyePos() )
+					self:AimAt(self:GetPos() + self:GetForward() * 400 )   
 				end
 			end
 			
 		else			
+		  self:AimAt(self:GetForward() * 400 )  
 			session_attack_distance = base_attack_distance
 		end
 		
@@ -3129,20 +3334,20 @@ function ENT:EngageEnemy( options )
 	end
 		
 	self:SetMood(NIXBOT_MOOD_STIMULATED)
-	
-	
-	
-	if ( !self:HaveEnemy()) then
-		self:RunHook("LostEnemy", options)
+
+  if ( !IsValid(self:GetEnemy()) ) then
+    self:RunHook("LostEnemy", options)
+    self:SetEnemy( nil )
+	elseif ( !self:HaveEnemy()) then
+	  self:RunHook("LostEnemy", options)
 		self:Debug(self:EntIndex(), " target gone")	
 		self:SetEnemy( nil )
+		return false
 	elseif ( !path:IsValid() ) then
 		self:Debug(self:EntIndex(), " invalid path")	
 		self:SetEnemy( nil )
-		return true, true
 	end
 
-  
 	--self:SetEnemy( NULL )
 	
 	return true

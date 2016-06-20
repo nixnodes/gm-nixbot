@@ -24,7 +24,7 @@ ENT.Options = {
 		Athletics = 0.27,
 		Agility = 0.25,
 		Courage = 0.64,
-		CommRange = 3500,	
+		CommRange = 12000,	
 	}, AnimHit = {
 		"p_LeanFwdLeft_Rifleout"
 	}, Sounds = {

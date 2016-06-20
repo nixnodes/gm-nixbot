@@ -81,16 +81,55 @@ hook.Add("EntityTakeDamage", "nixbot_skill_gain", function(target, dmg)
 	if ( target.NixBot ) then
 		target:SetRelationship(attacker, math.Clamp(target:GetRelationship(attacker) - (dmg:GetDamage() / 4), NIXBOT_RELATION_ARCH_ENEMY, NIXBOT_RELATION_OWNER ))
 				
+    if ( !target:HaveEnemy() && attacker != target:GetEnemy() &&
+		      target:GetRelationship(attacker) <= NIXBOT_RELATION_NEUTRAL &&
+		      target:IsEntityVisible(attacker) && 		      
+          target:GetPos():Distance(attacker:GetPos()) <= target:GetStatsVisRange() * 3 ) then
+		  
+		  target:SetInterrupt()
+		  
+		  local pos = attacker:GetPos()
+		  		  
+      target:AssignTask(target.PrioTasks, function(self)
+        self:Goto(pos,
+        {
+          notask = true, force = true,
+          activity = self:GetAnimAct("Run"),
+          speed = self:GetStatsRunspeed() + 25,
+          tolerance = 250, attack = true,
+          cond = function(self) 
+            if ( !IsValid(attacker) ) then
+              return
+            end
+            
+            if ( self:HaveEnemy() ) then
+              return false
+            end
+             
+            if ( self:TargetVisible(attacker) ) then
+              if ( attacker:IsPlayer() and !attacker:Alive() ) then
+                return false
+              elseif ( attacker:IsNPC() and ( attacker:Health() < 1 ) ) then
+                return false
+              end 
+            end
+                 
+          end
+        })
+      
+      end, nil, "proc_hchase")
+		end
+				
 		if ( target:InDanger() ) then
 		  target:SetRelationship (attacker, NIXBOT_RELATION_FEAR)		
 		  if ( target:GetRetreating() ) then
 		    target:SetInterrupt("retreat")
 		    timer.Create("NIXBOT.retreat."..target:EntIndex(), 5, 1, function()
-		      if ( IsValid(target) && target:InDanger() ) then target:StrategicRetreat() end
+		      if ( IsValid(target) && target:InDanger() ) then target:Flee() end
 		    end)
 		  else   
 		    timer.Remove("NIXBOT.retreat."..target:EntIndex())
-        target:StrategicRetreat()			
+        target:Flee()			
 		  end
 		end
 	end
@@ -109,7 +148,7 @@ function ENT:InDanger()
 end
 
 
-function ENT:StrategicRetreat()
+function ENT:Flee()
   local pos = self:FindSpot( "far", {
      type = "hiding",
      pos = self:GetPos(),
@@ -122,12 +161,11 @@ function ENT:StrategicRetreat()
       
   self:SetEnemy(nil)
   self:SetInterrupt()
-  self:SetInterrupt("combat")
-    
+  self:SetInterrupt("combat")    
   
   self:AssignTask(self.PrioTasks, function(self)   
      if ( self:GetRangeTo(pos) > 50 ) then  
-       print("goto", self)
+       --print("goto", self)
        self:SetRetreating(true)
        local res1, res2 = self:Goto(pos,
        {
@@ -184,6 +222,8 @@ function ENT:Initialize()
 	
 	self:SetPPDensity(1000)
 	
+	self.CarryMass = 0
+	
 	--self.PrintDebug = true
 
 	self.IsAlive = true
@@ -225,7 +265,7 @@ function ENT:Initialize()
 	self.ActivityMoodTranslateAI = {}
 	self.Stats = table.Copy(self.Options.Stats)
 	
-	self:Give(self.Options.Weapon.Class, "Weapon")
+	
 	
 	self.AnimSeq = DEFAULT_ANIM_SEQ
 	
@@ -251,9 +291,11 @@ function ENT:Initialize()
 									* (1 + AAAvg / 4)
 									
 	self.Stats.CognitiveDetectRange = self.Options.Stats.Awareness * 6000
-	self.Stats.VisibleDetectRange = self.Options.Stats.Awareness * 3750
+	self.Stats.VisibleDetectRange = self.Options.Stats.Awareness * 7500
 	self.Stats.TargetFocusRange = self.Options.Stats.Awareness * 1500
 	self.Stats.AbsoluteLoseTargetRange = self.Options.Stats.Awareness * 15000
+	
+	self.Stats.MaxCarryWeight = 1000 * self.Options.Stats.Athletics
 	
 	--[[print (
 		self:GetStatsAwareness(),
@@ -265,6 +307,8 @@ function ENT:Initialize()
 		self:GetStatsWalkspeed(),
 		self:GetStatsAccel()
 	) ]]
+	
+	self:Give(self.Options.Weapon.Class, "Weapon")
 	
 	self:SetMaxHealth(self.Options.Stats.Health)
 	self:SetHealth(self.Options.Stats.Health)		
@@ -298,7 +342,7 @@ function ENT:Initialize()
 	function meta:EyePos()
 		return self:GetAttachment( self:LookupAttachment( "eyes" ) ).Pos
 	end
-		
+	
 	self:SetPatrol(true)	
 	self:EnableItemPickup(true)
 	self:EnableSupplyAllies(true)
@@ -463,6 +507,10 @@ end
 
 function ENT:GetStatsAthletics()
   return self.Options.Stats.Athletics
+end
+
+function ENT:GetStatsMaxCarryWeight()
+  return self.Stats.MaxCarryWeight
 end
 
 function ENT:GetAnimAct(act)	
@@ -1081,9 +1129,8 @@ function ENT:IsEntityVisible(entity)
 		endpos = entity:GetPos() + entity:OBBCenter() ,
 		filter = {self, self.Weapon}
 	} )
-	
-	if ( tr.Entity == entity ) then		
 		
+	if ( tr.Entity == entity ) then				
 		return true
 	else
 		return false
@@ -1224,7 +1271,7 @@ function ENT:SupplyAllies()
     local score = disp * (100/distance)
     
     if ( self:HasItem("Entity", "item_healthkit") &&
-          v:Health() < v:GetMaxHealth() / 3 &&
+          v:Health() < v:GetMaxHealth() - 25 &&
           self:GetItemCount("Entity", "item_healthkit") > 2 ) then
       score = score + 20000 - v:Health()
       delivery_list["Entity"] = {
@@ -1530,7 +1577,7 @@ function ENT:AlertNeighbors(target, vec)
 	
 	for _,v in pairs(neighs) do
 		
-		if (v != self && v.NixBot == true && 
+		if (v != self && v:IsNixBot() && 
 			!v:HaveEnemy() && v:IsEntityValidTarget(target) && 
 			v:GetRelationship(target) < v:GetRelationship(self) && 
 			v:GetRelationship(target) > NIXBOT_RELATION_ENEMY - 1 ) then
@@ -1538,12 +1585,28 @@ function ENT:AlertNeighbors(target, vec)
 
 			v:SetRelationship(target, NIXBOT_RELATION_ENEMY - 1, 25)
 			v:SetMood(NIXBOT_MOOD_STIMULATED)
+			v:SetInterrupt()
 			
-			v:AssignTask(v.Tasks, v.AlertNeighbors, {target, vec} )
-			v:AssignTask(v.Tasks, v.AlertGotoWrapper, 
+			v:AssignTask(v.PrioTasks, v.AlertNeighbors, {target, vec}, "anei_alert" )
+			v:AssignTask(v.PrioTasks, v.AlertGotoWrapper, 
 						{target, vec, Vector( 0,0,0 ) , 
-						{speed = v:GetStatsRunspeed(), accel = v:GetStatsAccel(), 
-						activity = v:GetAnimAct("RunChase"), noint = true, notask = true} })
+						{
+						  speed = v:GetStatsRunspeed(), accel = v:GetStatsAccel(), 
+						  activity = v:GetAnimAct("RunChase"), noint = true, notask = true},
+						  cond = function(self)
+						    if ( !IsValid(target) ) then
+						      return false
+						    end
+						    
+						    if ( self:TargetVisible(attacker) ) then
+                  if ( attacker:IsPlayer() and !attacker:Alive() ) then
+                    return false
+                  elseif ( attacker:IsNPC() and ( attacker:Health() < 1 ) ) then
+                    return false
+                  end 
+                end
+						  end
+						}, "anei_goto")
 			
 			v:SetInterrupt()
 			
@@ -1757,7 +1820,7 @@ function ENT:AssemblePatrolPoints()
 	
 	self.AssemblyInProgress = true
 	
-	self:SayToOwner(self:EntIndex(), " Generating patrol points.." )
+	--self:SayToOwner(self:EntIndex(), " Generating patrol points.." )
 	
 	self.PatrolPoints = {}
 	
@@ -1780,7 +1843,7 @@ function ENT:AssemblePatrolPoints()
 		coroutine.yield()
 	end
 	
-	self:SayToOwner(self:EntIndex(), " "..#self.PatrolPoints.." patrol points found" )
+	--self:SayToOwner(self:EntIndex(), " "..#self.PatrolPoints.." patrol points found" )
 
 	self:InterruptClr("asmpp")
 	
@@ -1975,7 +2038,7 @@ function ENT:Main()
 			local nodelay = false
 			local noactreset = false
 			
-			while ( true ) do		
+			while ( self:Alive() ) do		
 				self:ClearInterrupts()
 				
 				--self:UpdateRanks()								
@@ -2105,27 +2168,73 @@ function ENT:GetAmmoCount(id)
 	return self.dump.Ammo[id] || 0
 end
 
-function ENT:Give(class, t)
+function ENT:GetCarryMass()
+  return self.CarryMass
+end
 
-	if (!self.dump[t]) then
-		self.dump[t] = {}
-	end
-		
-	local count = self.dump[t][class]
-		
-	if ( count == nil ) then	
-		self.dump[t][class] = 1
-	else
-		self.dump[t][class] = math.Clamp(count + 1, 1, 100000)
-	end				
+function ENT:Give(class, t, item)
+  local mass
+
+  if ( IsValid(item) ) then
+    mass = item:GetPhysicsObject():GetMass()
+  else
+    mass = 0
+  end
+  
+  local newmass = self.CarryMass + mass
+  
+  if ( newmass > self:GetStatsMaxCarryWeight() ) then
+    return false
+  end
+  
+  self.CarryMass = newmass
+
+  if (!self.dump[t]) then
+  	self.dump[t] = {}
+  end
+  
+  if ( !self.dump[t][class] ) then
+    self.dump[t][class] = {}
+  end
+  	
+  local data = self.dump[t][class]
+  
+  data.mass = mass 
+  	
+  if ( data.count == nil ) then	
+  	data.count = 1
+  else
+  	data.count = math.Clamp(data.count + 1, 1, 100000)
+  end				
+  
 end
 
 function ENT:HasItem(t, class)
-	return (self.dump[t] && self.dump[t][class] && self.dump[t][class] > 0 ) && true || false
+  if ( !self.dump[t] ) then
+    return false
+  end
+  
+  local data = self.dump[t][class]
+  
+  if ( !data ) then
+    return false
+  end
+  
+	return (data.count && data.count > 0) && true || false
 end
 
 function ENT:GetItemCount(t, class)
-  return (self.dump[t] && self.dump[t][class] && self.dump[t][class] ) || 0
+  if ( !self.dump[t] ) then
+    return 0
+  end
+  
+  local data = self.dump[t][class]
+  
+  if ( !data ) then
+    return 0
+  end
+  
+  return data.count && data.count || 0
 end
 
 function ENT:PopItem(t, class, c)
@@ -2133,15 +2242,17 @@ function ENT:PopItem(t, class, c)
 		return false
 	end
 	
-	local count = self.dump[t][class]
+	local data = self.dump[t][class]
 	
-	if ( nil == count || count == 0 ) then
+	if ( nil == data || nil == data.count || data.count == 0 ) then
 		return false
 	end
 	
-	local take = math.Clamp(c,1,count)
+	local take = math.Clamp(c || 1,1,data.count)
 	
-	self.dump[t][class] = count - (take || 1)
+	data.count = data.count - take
+	
+	self.CarryMass = self.CarryMass - (data.mass * take)
 	
 	return take
 end
@@ -2200,7 +2311,11 @@ function ENT:DropItem(t, class, pos, count)
 end
 
 function ENT:PickupItem(item)
-	self:Give(item:GetClass(), type(item))
+  
+  if ( !self:Give(item:GetClass(), type(item), item) ) then
+    return false
+  end
+  
 	self.LastPickup = item
 	
 	if ( type(item) == "Weapon" ) then
@@ -2356,6 +2471,10 @@ function ENT:FlankEnemy()
   
   local r1, r2 = self:Goto(pos1, table.Copy(opts))
   
+  if ( !IsValid(enemy) ) then
+    return
+  end
+  
   if ( r2 ) then
     pos = enemy:GetPos() + enemy:OBBCenter()
     dist = self:GetPos():Distance(pos)
@@ -2372,9 +2491,6 @@ function ENT:FlankEnemy()
   
     self:Goto(pos1, table.Copy(opts))
   end
-  
-  
-  return
   
 end
 
@@ -2404,7 +2520,7 @@ function ENT:RunBehaviour()
 	
 	self.loco:SetJumpHeight((self.Options.Stats.Athletics + self.Options.Stats.Agility / 8) * 255)
 				
-	self:AssignTimedTask("ContinuousAlertNeighbors", self.TimedCombatTasks, 5)
+	self:AssignTimedTask("ContinuousAlertNeighbors", self.TimedCombatTasks, 1)
 	self:AssignTimedTask("AutoEvade", self.TimedCombatTasks, 0.2)
 	self:AssignTimedTask("UpdateRanks", self.TimedCombatTasks, 2)
 	self:AssignTimedTask("DecreaseEnemyTensionsStep", self.TimedCombatTasks, 5)
@@ -2420,9 +2536,7 @@ function ENT:RunBehaviour()
 	self.loco:SetStepHeight(50)
 	self.loco:SetDeathDropHeight(400)
 	self.loco:SetDeceleration(self.Stats.Decel)
-	
-	
-	
+		
 	self:AssemblePatrolPoints()
 
 	self.MovTypeProc[3] = function(self, seg) 
@@ -3004,7 +3118,8 @@ function ENT:Follow (options)
   local target = self.FollowTarget
   
 	if ( !IsValid(target) ||
-	     self:GetRelationship(target) < NIXBOT_RELATION_FRIEND ) then
+	     self:GetRelationship(target) < NIXBOT_RELATION_FRIEND ||
+	     !target:Alive() ) then
 		return false
 	end
 

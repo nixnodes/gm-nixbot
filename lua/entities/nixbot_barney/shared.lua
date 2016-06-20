@@ -22,7 +22,7 @@ ENT.Options = {
 		Athletics = 0.33,
 		Agility = 0.32,
 		Courage = 0.64,
-		CommRange = 3500,
+		CommRange = 9500,
 	}, AnimHit = {
 		"SWI_toDelivery"
 	},Sounds = {

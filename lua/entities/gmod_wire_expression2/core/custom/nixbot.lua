@@ -243,6 +243,17 @@ e2function void entity:assemblePatrolPoints()
   this:TriggerRemoteAPP()
 end
 
+e2function void entity:getPPCount()
+  if ( !ValidateNixBot(self, this) ) then return 0 end
+  
+  return #this.PatrolPoints
+end
+
+e2function void entity:getCarryWeight()
+  if ( !ValidateNixBot(self, this) ) then return 0 end
+  
+  return this:GetCarryMass()
+end
 
 e2function table entity:getWeapons()
 	if ( !ValidateNixBot(self, this) ) then return 0 end

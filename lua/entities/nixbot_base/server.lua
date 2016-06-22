@@ -2182,7 +2182,7 @@ function ENT:Give(class, t, item)
   end
   
   local newmass = self.CarryMass + mass
-  
+    
   if ( newmass > self:GetStatsMaxCarryWeight() ) then
     return false
   end
@@ -2207,6 +2207,7 @@ function ENT:Give(class, t, item)
   	data.count = math.Clamp(data.count + 1, 1, 100000)
   end				
   
+  return true
 end
 
 function ENT:HasItem(t, class)
@@ -2349,6 +2350,7 @@ function ENT:LookForUsableItems()
 		return
 	end
 	
+	
 	local _ents = ents.FindInCone( self:EyePos(), self:EyeAngles():Forward(), self:GetStatsVisRange() / 6, 0 )
 	local hit 
 	
@@ -2366,7 +2368,19 @@ function ENT:LookForUsableItems()
 		
 		self:Goto(v:GetPos(), {
 			noint = true, notask = true, tolerance = 10,
-			cond = function() if ( !IsValid(v) ) then return false end end
+			cond = function() 
+			  if ( !IsValid(v) ) then return false end 
+			  
+			  local pseg = self.path:GetCurrentGoal()
+       
+        if ( !pseg ) then
+          return 
+        end
+        
+        if ( pseg.distanceFromStart > self:GetStatsVisRange() / 6 ) then   
+          return false
+        end
+			end
 		})
 				
 		--[[if ( IsValid(v) && self:GetPos():Distance(v:GetPos()) < 75 ) then

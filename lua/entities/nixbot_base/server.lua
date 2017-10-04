@@ -4,14 +4,16 @@ end
 
 CreateConVar( "sbox_maxnbs", "4", bit.bor(FCVAR_ARCHIVE,FCVAR_SERVER_CAN_EXECUTE) )
 
-NIXBOT_RELATION_FEAR = -8
-NIXBOT_RELATION_ARCH_ENEMY = -6
-NIXBOT_RELATION_ENEMY = -4
-NIXBOT_RELATION_FOE = -2
-NIXBOT_RELATION_NEUTRAL = 0
-NIXBOT_RELATION_FRIEND = 2
-NIXBOT_RELATION_ALLY = 4
-NIXBOT_RELATION_OWNER = 8
+local NIXBOT_RELATIONS = {
+	NIXBOT_RELATION_FEAR = -8,
+	NIXBOT_RELATION_ARCH_ENEMY = -6,
+	NIXBOT_RELATION_ENEMY = -4,
+	NIXBOT_RELATION_FOE = -2,
+	NIXBOT_RELATION_NEUTRAL = 0,
+	NIXBOT_RELATION_FRIEND = 2,
+	NIXBOT_RELATION_ALLY = 4,
+	NIXBOT_RELATION_OWNER = 8,
+}
 
 NIXBOT_MOOD_RELAXED = 0
 NIXBOT_MOOD_STIMULATED = 1
@@ -49,9 +51,9 @@ hook.Add( "PlayerSpawnNPC", "nixbot_spawn", function ( ply, npc_type, weapon )
 end )
 
 hook.Add( "PlayerSpawnedNPC", "nixbot_spawned", function ( ply, ent )	
-	if ( ent:IsNixBot() ) then
-		ply:AddCount("nbs", ent)		
-    ent:SetRelationship(ply, NIXBOT_RELATION_OWNER, 99)
+	if ( IsValid(ent) && ent:IsNixBot() ) then
+		--ply:AddCount("nixbots", ent)		
+		ent:SetRelationship(ply, NIXBOT_RELATIONS.NIXBOT_RELATION_OWNER, 99)
 	end
 end )
 
@@ -62,14 +64,14 @@ end )
 hook.Add("EntityTakeDamage", "nixbot_skill_gain", function(target, dmg)
 	local attacker = dmg:GetAttacker()	
 		
-	if ( !IsValid(attacker) || attacker == game.GetWorld() ) then
+	if ( !IsValid(attacker) || !IsValid(target) || attacker == game.GetWorld() ) then
 		return
 	end
 		
 	if ( attacker.NixBot ) then		
 	
 		if ( target.NixBot ) then
-			if ( attacker:GetRelationship(target) >= NIXBOT_RELATION_ALLY ) then
+			if ( attacker:GetRelationship(target) >= NIXBOT_RELATIONS.NIXBOT_RELATION_ALLY ) then
 				return true
 			end
 		end
@@ -79,10 +81,10 @@ hook.Add("EntityTakeDamage", "nixbot_skill_gain", function(target, dmg)
 	end
 	
 	if ( target.NixBot ) then
-		target:SetRelationship(attacker, math.Clamp(target:GetRelationship(attacker) - (dmg:GetDamage() / 4), NIXBOT_RELATION_ARCH_ENEMY, NIXBOT_RELATION_OWNER ))
+		target:SetRelationship(attacker, math.Clamp(target:GetRelationship(attacker) - (dmg:GetDamage() / 4), NIXBOT_RELATIONS.NIXBOT_RELATION_ARCH_ENEMY, NIXBOT_RELATIONS.NIXBOT_RELATION_OWNER ))
 				
     if ( !target:HaveEnemy() && attacker != target:GetEnemy() &&
-		      target:GetRelationship(attacker) <= NIXBOT_RELATION_NEUTRAL &&
+		      target:GetRelationship(attacker) <= NIXBOT_RELATIONS.NIXBOT_RELATION_NEUTRAL &&
 		      target:IsEntityVisible(attacker) && 		      
           target:GetPos():Distance(attacker:GetPos()) <= target:GetStatsVisRange() * 3 ) then
 		  
@@ -121,7 +123,7 @@ hook.Add("EntityTakeDamage", "nixbot_skill_gain", function(target, dmg)
 		end
 				
 		if ( target:InDanger() ) then
-		  target:SetRelationship (attacker, NIXBOT_RELATION_FEAR)		
+		  target:SetRelationship (attacker, NIXBOT_RELATIONS.NIXBOT_RELATION_FEAR)		
 		  if ( target:GetRetreating() ) then
 		    target:SetInterrupt("retreat")
 		    timer.Create("NIXBOT.retreat."..target:EntIndex(), 5, 1, function()
@@ -195,7 +197,7 @@ function ENT:Flee()
 end
 
 local function ValidateEnemyDefault(self, enemy)
-	if ( self:GetRelationship(enemy) > NIXBOT_RELATION_ENEMY ) then
+	if ( self:GetRelationship(enemy) > NIXBOT_RELATIONS.NIXBOT_RELATION_ENEMY ) then
 		return false		
 	elseif ( self:GetRangeTo( enemy:GetPos() ) > self.Stats.AbsoluteLoseTargetRange ) then
 		return false
@@ -226,10 +228,12 @@ function ENT:Initialize()
 	
 	--self.PrintDebug = true
 
+	self.RELATIONS = setmetatable({}, { __index=NIXBOT_RELATIONS }) 
+	
 	self.IsAlive = true
 	self.LastUsed = 0
 	self.stuck_counter = 0
-	self.ProtectDispThreshold = NIXBOT_RELATION_NEUTRAL
+	self.ProtectDispThreshold = NIXBOT_RELATIONS.NIXBOT_RELATION_NEUTRAL
 	self.Kills = 0
 	self.PrevKills = 0
 	self.Mood = 0
@@ -258,6 +262,7 @@ function ENT:Initialize()
 			["item_healthkit"] = true
 		}
 	}
+	
 	
 	self.SELastPlayed = {}
 	self.CSStart = 0
@@ -362,6 +367,7 @@ function ENT:InitializePhysics()
     
   local phys = self:GetPhysicsObject()
   if ( !phys:IsValid() ) then
+	self:SayToOwner(self:EntIndex(), " no physics object")
     return false
   end
      
@@ -399,11 +405,11 @@ function ENT:PlaySound(event, cooldown)
 	if ( cooldown ) then	
 		local lp = self.SELastPlayed[event]
 		
-		if ( lp && os.time() - lp < cooldown ) then
+		if ( lp && SysTime() - lp < cooldown ) then
 			return false
 		end
 		
-		self.SELastPlayed[event] = os.time()
+		self.SELastPlayed[event] = SysTime()
 	end
 	
 	local evs = self.Sounds[event]
@@ -725,8 +731,8 @@ function ENT:DecreaseEnemyTensionsStep()
 				continue
 			end
 			if ( v.ent != self:GetEnemy() &&
-				v.disp < NIXBOT_RELATION_NEUTRAL ) then
-				v.disp = math.Clamp(v.disp + (1 / ((-1*v.disp)^2)) * 0.4, v.disp, NIXBOT_RELATION_NEUTRAL)
+				v.disp < NIXBOT_RELATIONS.NIXBOT_RELATION_NEUTRAL ) then
+				v.disp = math.Clamp(v.disp + (1 / ((-1*v.disp)^2)) * 0.4, v.disp, NIXBOT_RELATIONS.NIXBOT_RELATION_NEUTRAL)
 				--self:SayToOwner(self:EntIndex(), " relations toward ", v.ent, " :", v.disp)
 			end			
 		else
@@ -751,7 +757,7 @@ function ENT:SetRelationship(target, disposition, priority, persist)
 			
 		self.Relationships[target:SteamID()] = {
 			ent = target,
-			disp = disposition && math.Clamp(disposition, NIXBOT_RELATION_FEAR, NIXBOT_RELATION_OWNER) || orel.disp,
+			disp = disposition && math.Clamp(disposition, NIXBOT_RELATIONS.NIXBOT_RELATION_FEAR, NIXBOT_RELATIONS.NIXBOT_RELATION_OWNER) || orel.disp,
 			prio = priority || orel.prio,
 			persist = persist
 		}
@@ -764,7 +770,7 @@ function ENT:SetRelationship(target, disposition, priority, persist)
 		end
 		table.insert(self.Relationships, {
 			ent = target,
-			disp = math.Clamp(disposition || NIXBOT_RELATION_NEUTRAL, NIXBOT_RELATION_FEAR, NIXBOT_RELATION_OWNER),
+			disp = math.Clamp(disposition || NIXBOT_RELATIONS.NIXBOT_RELATION_NEUTRAL, NIXBOT_RELATIONS.NIXBOT_RELATION_FEAR, NIXBOT_RELATIONS.NIXBOT_RELATION_OWNER),
 			prio = priority || 0,
 			persist = persist
 		})
@@ -776,7 +782,7 @@ function ENT:SetRelationship(target, disposition, priority, persist)
 end
 
 local DEFAULT_REL_TABLE = {
-	disp = NIXBOT_RELATION_NEUTRAL,
+	disp = NIXBOT_RELATIONS.NIXBOT_RELATION_NEUTRAL,
 	prio = 0
 }
 
@@ -796,14 +802,14 @@ function ENT:GetRelationshipTable(ent)
 		if ( ent.NixBot && self.NixBot ) then
 			if ( self:CPPIGetOwner() == ent:CPPIGetOwner() ) then
 				local t = table.Copy(DEFAULT_REL_TABLE)
-				t.disp = NIXBOT_RELATION_ALLY
+				t.disp = NIXBOT_RELATIONS.NIXBOT_RELATION_ALLY
 				t.prio = 75
 				return t 
 			end
 		elseif ( IsEnemyEntityName(ent:GetClass()) || 
 					ent:GetClass() == "npc_strider" ) then
 			local t = table.Copy(DEFAULT_REL_TABLE)
-			t.disp = NIXBOT_RELATION_ENEMY
+			t.disp = NIXBOT_RELATIONS.NIXBOT_RELATION_ENEMY
 			return t 
 		end
 	
@@ -834,7 +840,7 @@ function ENT:GetRelationship(ent)
 end
 
 function ENT:ComputePath( path, loc, f )
-	path:Compute(self, loc , function( area, fromArea, ladder, elevator, length )
+	return path:Compute(self, loc , function( area, fromArea, ladder, elevator, length )
 		if ( f ) then
 			local r = f (self, area, fromArea, ladder, elevator, length)
 			if ( r == -1 ) then
@@ -977,7 +983,7 @@ function ENT:ProcessTask(tab)
 end
 
 local function UseAllowed(ent)
-	if ( ( ent.nixbot_last_used && os.time() - ent.nixbot_last_used < 10 ) ||
+	if ( ( ent.nixbot_last_used && SysTime() - ent.nixbot_last_used < 10 ) ||
 			!USABLE_PROPS[ent:GetClass()]
 			) then
 		return false
@@ -1000,7 +1006,7 @@ function ENT:OnContact( ent )
 	end
 		
 	if ( UseAllowed(ent) ) then
-		ent.nixbot_last_used = os.time()	
+		ent.nixbot_last_used = SysTime()	
 		ent:Use(self, self, USE_TOGGLE, 0)
 		self:Debug(self:EntIndex(), " contact, using", ent)
 	elseif ( self:GetPickupItems() && self:CheckValidPickup(ent) ) then
@@ -1174,10 +1180,10 @@ function ENT:ScanEntAttackingFriend(v)
 		--print(self, target, v, trel, arel )
 		
 		if ( trel >= self.ProtectDispThreshold && trel > arel ) then
-			self:SetRelationship(v, NIXBOT_RELATION_ARCH_ENEMY, 95)	
+			self:SetRelationship(v, NIXBOT_RELATIONS.NIXBOT_RELATION_ARCH_ENEMY, 95)	
 			self:PlaySound("AlertDanger", 120)
 			if ( v.NixBot ) then
-				v:SetRelationship(self, NIXBOT_RELATION_ENEMY + 1, 95)		
+				v:SetRelationship(self, NIXBOT_RELATIONS.NIXBOT_RELATION_ENEMY + 1, 95)		
 			end
 		end
 		
@@ -1241,8 +1247,11 @@ function ENT:GotoDoTrackTarget(lset, data)
   end
   lset.pos = data.ent:GetPos()
   if ( self.path:GetAge() > 1 ) then
-    self.path:Compute(self, lset.pos)
-    self.path:Update(self)
+    if ( !self.path:Compute(self, lset.pos) ) then
+		self.path:Invalidate()
+	else
+		self.path:Update(self)
+	end
   end
 end
 
@@ -1263,7 +1272,7 @@ function ENT:SupplyAllies()
     
     local disp = self:GetRelationship(v)
     
-    if ( disp < NIXBOT_RELATION_NEUTRAL ) then
+    if ( disp < NIXBOT_RELATIONS.NIXBOT_RELATION_NEUTRAL ) then
       continue
     end
     
@@ -1348,9 +1357,9 @@ function ENT:DetectEnemyInView()
 		local distance = self:GetPos():Distance(v:GetPos())
 		local disp = self:GetRelationship(v)
 		
-		if ( disp <= NIXBOT_RELATION_FOE ) then
+		if ( disp <= NIXBOT_RELATIONS.NIXBOT_RELATION_FOE ) then
 			self.foe_in_view = true
-		elseif (disp > NIXBOT_RELATION_ENEMY ) then	
+		elseif (disp > NIXBOT_RELATIONS.NIXBOT_RELATION_ENEMY ) then	
 			if ( v:IsPlayer() && distance < 500 && 
 					disp > cres.ally_disp ) then
 				cres.ent_ally = v
@@ -1369,9 +1378,9 @@ function ENT:DetectEnemyInView()
 	end
 			
 	if ( cres.ent_ally && !self:IsFollowing() ) then		
-		if ( cres.ally_disp >= NIXBOT_RELATION_NEUTRAL ) then
+		if ( cres.ally_disp >= NIXBOT_RELATIONS.NIXBOT_RELATION_NEUTRAL ) then
 			self:PlaySound("GreetPlayerFriend", 30)			
-		elseif ( cres.ally_disp <= NIXBOT_RELATION_FOE ) then
+		elseif ( cres.ally_disp <= NIXBOT_RELATIONS.NIXBOT_RELATION_FOE ) then
 			self:PlaySound("GreetPlayerFoe", 30)
 		end
 	end
@@ -1403,9 +1412,9 @@ function ENT:DetectEnemyCog()
 		self:ScanEntAttackingFriend(v)
 		local disp = self:GetRelationship(v)
 		
-		if ( disp <= NIXBOT_RELATION_FOE ) then
+		if ( disp <= NIXBOT_RELATIONS.NIXBOT_RELATION_FOE ) then
 			self.foe_in_view = true
-		elseif ( disp > NIXBOT_RELATION_ENEMY ) then
+		elseif ( disp > NIXBOT_RELATIONS.NIXBOT_RELATION_ENEMY ) then
 			continue
 		end
 			
@@ -1459,8 +1468,8 @@ end
 
 
 function ENT:WaitAlert(t)
-	local start = os.time()
-	while ( !self:HaveEnemy() && !self:HasTask(self.Tasks) && !self:Interrupt() && os.time() - start < t ) do	
+	local start = SysTime()
+	while ( !self:HaveEnemy() && !self:HasTask(self.Tasks) && !self:Interrupt() && SysTime() - start < t ) do	
 		self:LookIdle()
 		coroutine.yield()
 	end
@@ -1580,10 +1589,10 @@ function ENT:AlertNeighbors(target, vec)
 		if (v != self && v:IsNixBot() && 
 			!v:HaveEnemy() && v:IsEntityValidTarget(target) && 
 			v:GetRelationship(target) < v:GetRelationship(self) && 
-			v:GetRelationship(target) > NIXBOT_RELATION_ENEMY - 1 ) then
+			v:GetRelationship(target) > NIXBOT_RELATIONS.NIXBOT_RELATION_ENEMY - 1 ) then
 			--v:SetEnemy(target)
 
-			v:SetRelationship(target, NIXBOT_RELATION_ENEMY - 1, 25)
+			v:SetRelationship(target, NIXBOT_RELATIONS.NIXBOT_RELATION_ENEMY - 1, 25)
 			v:SetMood(NIXBOT_MOOD_STIMULATED)
 			v:SetInterrupt()
 			
@@ -1681,7 +1690,7 @@ local function DoSurfaceTrace(origin)
 		start = origin,
 		endpos = origin - vector_up * 200000 ,
 		filter = function(ent)
-			if ( ent:IsPlayer() || ent:IsNPC() || ent:IsWeapon() ) then
+			if ( !ent:IsWorld() ) then
 				return false
 			else
 				return true
@@ -1695,11 +1704,11 @@ local function GetSurfacePoint(origin)
 	
 	if ( !tr.HitWorld ||
 		tr.StartSolid ||
-		!ValidateNavPoint(tr.HitPos) ||
-		#ents.FindInBox(tr.HitPos - Vector(50,50,50), tr.HitPos + Vector(50,50,50)) != 0 ) then
+		!ValidateNavPoint(tr.HitPos) ) then
 		return false
 	end
 	
+	--[[
 	for i = 1, 25 do
 		local t = DoSurfaceTrace(origin +
 				Vector(math.Rand(-1,1), math.Rand(-1,1), 0) * 100 )
@@ -1710,6 +1719,7 @@ local function GetSurfacePoint(origin)
 			return false
 		end
 	end
+	]]
 	
 	return tr.HitPos
 end
@@ -1728,9 +1738,11 @@ local function CheckPatrolPointDistR(self, p)
 	return true
 end
 
+
+
 function ENT:ComputeNavPoint(area_start, area_size)
-	local start = os.time()
-	while ( os.time() - start < 120 ) do
+	local start = SysTime()
+	while ( SysTime() - start < 10 ) do
 		
 		local randpos = area_start + (
 				Vector(math.Rand(0,1), math.Rand(0,1), math.Rand(0,1))
@@ -1738,7 +1750,7 @@ function ENT:ComputeNavPoint(area_start, area_size)
 		
 		
 		if ( !ValidateNavPoint(randpos)  ) then
-
+			self:SayToOwner(self:EntIndex(), " WARNING: Could not validate nav point ", area_start ,area_size)
 			coroutine.yield()
 			continue
 		end
@@ -1746,28 +1758,57 @@ function ENT:ComputeNavPoint(area_start, area_size)
 		local finalpos = GetSurfacePoint(randpos)
 		
 		if ( !finalpos  ) then
-
+			self:SayToOwner(self:EntIndex(), " WARNING: Unable to get surface point ", area_start ,area_size)
 			coroutine.yield()
 			continue
 		end
 
 		local path = Path( "Follow" )	
 		path:SetGoalTolerance(  20 )
-		path:Compute( self, finalpos )		-- Compute the path towards the enemies position
 		
-		if ( !path:IsValid() ) then	
+		
+		if ( !path:Compute( self, finalpos ) || !path:IsValid() ) then	
+			self:SayToOwner(self:EntIndex(), " WARNING: Computed path not valid, discarding ", area_start ,area_size)
 			coroutine.yield()
 			continue
 		end
 		
+		--local bad
+		
+		--local lseg = path:LastSegment()
+		
+		--for k, v in pairs(path:GetAllSegments()) do
+		
+		local v = path:GetCurrentGoal()
+		
+		local area = v.area
+		
+		if (!area:IsValid() ) then
+			self:SayToOwner(self:EntIndex(), " WARNING: Invalid area", area_start ,area_size)
+			
+		end
+		
+		if ( area:GetAdjacentCount() == 0 ) then
+			self:SayToOwner(self:EntIndex(), " WARNING: Area has no adjacent areas ", area_start ,area_size)
+			
+		end
+		
+		if ( area:IsUnderwater() || 
+				!self.loco:IsAreaTraversable(area) ) then
+			self:SayToOwner(self:EntIndex(), " WARNING: Computed path not traversable, discarding ", area_start ,area_size)
+			
+		end
+			
+			--area:Draw()
+		--end
+		--[[
+		if ( bad == true ) then
+			coroutine.yield()
+			continue
+		end
+		]]
 		
 		local lseg = path:LastSegment()
-		
-		if ( lseg.area:IsUnderwater() || 
-				!self.loco:IsAreaTraversable(lseg.area) ) then
-			coroutine.yield()
-			continue
-		end
 				
 		return lseg.pos
 	end
@@ -1827,8 +1868,12 @@ function ENT:AssemblePatrolPoints()
 	self.PatrolMinIPDistance = self.PatrolMinIPDistance || 400
 	self.PatrolMaxPoints = self.PatrolAreaSize:Length() / self:GetPPDensity()
 	
+	local tmstart = SysTime()
+	
 	while ( #self.PatrolPoints < self.PatrolMaxPoints ) do
-		if ( self:InterruptClr("asmpp") ) then
+
+		if ( self:InterruptClr("asmpp") ||
+			 SysTime() - tmstart > 30 ) then
 			break
 		end
 		
@@ -1843,7 +1888,7 @@ function ENT:AssemblePatrolPoints()
 		coroutine.yield()
 	end
 	
-	--self:SayToOwner(self:EntIndex(), " "..#self.PatrolPoints.." patrol points found" )
+	self:SayToOwner(self:EntIndex(), " "..#self.PatrolPoints.." patrol points found" )
 
 	self:InterruptClr("asmpp")
 	
@@ -1941,7 +1986,7 @@ function ENT:AutoEvade()
 	local pseg = self.path && self.path:GetCurrentGoal()
 	
 	if ( UseAllowed(subject) ) then
-		subject.nixbot_last_used = os.time()	
+		subject.nixbot_last_used = SysTime()	
 		subject:Use(self, self, USE_TOGGLE, 0)
 	end
 
@@ -1959,12 +2004,16 @@ function ENT:AutoEvade()
 								end
 							end)
 	
-	if ( path && pseg ) then path:Compute(self, pseg.pos) end
+	if ( path && pseg ) then 
+		if ( !path:Compute(self, pseg.pos) ) then
+			path:Invalidate()
+		end
+	end
 	
 	return ret
 	
 end
-
+--[[
 local function MovementDiscovery(self, w)
 	self.loco:SetDesiredSpeed( 100 )
 
@@ -2000,7 +2049,7 @@ local function MovementDiscovery(self, w)
 	
 	while ( true ) do
 	
-		--if ( os.time() - lt > 2 ) then
+		--if ( SysTime() - lt > 2 ) then
 			if ( #gg == 0 ) then
 				return
 				
@@ -2014,7 +2063,7 @@ local function MovementDiscovery(self, w)
 			
 			table.remove(gg, #gg)
 			
-			lt = os.time()
+			lt = SysTime()
 		--end
 		path:Compute( self, self:CPPIGetOwner():GetPos() )
 		path:Update(self)
@@ -2023,6 +2072,7 @@ local function MovementDiscovery(self, w)
 	end
 	
 end
+]]
 
 function ENT:UpdateRanks()
 	self:SetNWFloat("nb_rank", self:GetRank())
@@ -2077,8 +2127,8 @@ function ENT:Main()
 					if ( self:Follow ( { 
 							tolerance = 250, attack = true
 						}) == false ) then
-						self.SELastPlayed["GreetPlayerFriend"] = os.time()
-						self.SELastPlayed["GreetPlayerFoe"] = os.time()
+						self.SELastPlayed["GreetPlayerFriend"] = SysTime()
+						self.SELastPlayed["GreetPlayerFoe"] = SysTime()
 						self:SetFollowTarget(nil)
 					end
 					
@@ -2369,17 +2419,17 @@ function ENT:LookForUsableItems()
 		self:Goto(v:GetPos(), {
 			noint = true, notask = true, tolerance = 10,
 			cond = function() 
-			  if ( !IsValid(v) ) then return false end 
-			  
-			  local pseg = self.path:GetCurrentGoal()
+				if ( !IsValid(v) ) then return false end 
+
+				local pseg = self.path:GetCurrentGoal()
        
-        if ( !pseg ) then
-          return 
-        end
+				if ( !pseg ) then
+				  return 
+				end
         
-        if ( pseg.distanceFromStart > self:GetStatsVisRange() / 6 ) then   
-          return false
-        end
+				if ( pseg.distanceFromStart > self:GetStatsVisRange() / 6 ) then   
+					return false
+				end
 			end
 		})
 				
@@ -2714,7 +2764,7 @@ end
 
 function ENT:DischargeBurst (enemy, count, path)
 
-	if ( !IsValid(self.Weapon) || os.time() - self.LastBurst < math.Rand(0.5,2)  ) then
+	if ( !IsValid(self.Weapon) || SysTime() - self.LastBurst < math.Rand(0.5,2)  ) then
 		self:AimAt(self.last_bone && self:CalculateEnemyHitpos(enemy, self.last_bone) || self:GetPos() + self:GetForward() * 400 )  
 		return false
 	end
@@ -2771,7 +2821,7 @@ function ENT:DischargeBurst (enemy, count, path)
 		
 	end
 	
-	self.LastBurst = os.time()	
+	self.LastBurst = SysTime()	
 	if ( self.Weapon.SetShotsFired ) then
 		self.Weapon:SetShotsFired( 0 )
 	end	
@@ -2828,7 +2878,7 @@ function ENT:StartActivityE(act, speed, acc)
 		end
 		return
 	end
-		
+	
 	self.CurrentActivity = act
 	if ( act ) then
 		self:StartActivity( act )
@@ -2837,6 +2887,11 @@ end
 
 function ENT:GetEnemyPos()
 	local enemy = self:GetEnemy()
+	
+	if ( !IsValid(enemy) ) then
+		return
+	end
+	
 	return enemy:GetPos() + enemy:OBBCenter() 
 end
 
@@ -2910,7 +2965,7 @@ function ENT:HandleStuck()
 	if ( IsValid(ent) ) then
 		ent:Use(self, self, USE_TOGGLE, 0)
 		self:Debug(self:EntIndex(), " stuck, using", ent)	
-		ent.nixbot_last_used = os.time()
+		ent.nixbot_last_used = SysTime()
 		coroutine.wait(1.25)
 	end
 
@@ -2984,7 +3039,7 @@ end
 function ENT:Goto(loc, options)
 	local options = options or {}
 
-  options.speed = options.speed or self:GetStatsWalkspeed()
+	options.speed = options.speed or self:GetStatsWalkspeed()
 	options.accel = options.accel or self:GetStatsAccel()
 	
 	local actopts = {options.activity or self:GetAnimAct("Walk"), 
@@ -2999,15 +3054,14 @@ function ENT:Goto(loc, options)
 	self.path = path
 	path:SetMinLookAheadDistance( options.lookahead or 750 )
 	path:SetGoalTolerance( options.tolerance )
-	path:Compute( self, loc )	
 	
-	options.maxage = options.maxage || 900
-
-	if ( !path:IsValid() ) then 
+	if ( !path:Compute( self, loc )	|| !path:IsValid() ) then 
 		self:Debug(self:EntIndex(), " goto: invalid path")
 		return false 
 	end
-	
+		
+	options.maxage = options.maxage || 900
+
 	local lset = {
 	   loc = loc
 	}
@@ -3021,7 +3075,7 @@ function ENT:Goto(loc, options)
 		end
 								
 		if ( self:Interrupt() && options.noint != true ) then
-			self:Debug(self:EntIndex(), " interrupting patrol")
+			self:Debug(self:EntIndex(), " interrupting goto")
 			break
 		end
 		
@@ -3038,11 +3092,13 @@ function ENT:Goto(loc, options)
 			if ( self:ProcessTimedTasks(self.TimedMovementTasks, path) ) then	
 								
 				if ( !path:IsValid() ) then		
-					path:Compute(self, lset.loc)
+					if ( !path:Compute(self, lset.loc) ) then
+						path:Invalidate()
+						break
+					end
 					coroutine.yield()
 					continue
-				end
-								
+				end			
 							
 				self.path = path					
 			end
@@ -3050,9 +3106,12 @@ function ENT:Goto(loc, options)
 		
 		local pseg = path:GetCurrentGoal()
 		
-		if ( pseg) then
+		if ( IsValid(pseg)) then
 			if ( pseg.area:IsUnderwater() && !fseg.area:IsUnderwater() ) then
-				self:ComputePath(path, lset.loc)
+				if ( !self:ComputePath(path, lset.loc) ) then
+					path:Invalidate()
+					break
+				end
 				coroutine.wait(1)
 				continue
 			end
@@ -3070,7 +3129,10 @@ function ENT:Goto(loc, options)
 			if ( options.persist != true ) then
 				return true
 			else
-				path:Compute(self, lset.loc)
+				if ( !self:ComputePath(path, lset.loc) ) then
+					path:Invalidate()
+					break
+				end
 			end
 		end
 				
@@ -3090,14 +3152,13 @@ function ENT:Goto(loc, options)
 			  self:AimAt(self:GetPos() + self:GetForward() * 400 ) 
 			end
 		else
-		  self:StartActivityE( unpack(actopts) )
-		  self:LookIdle()
+			self:StartActivityE( unpack(actopts) )
+			self:LookIdle()
 		end
 		
-	
-			
 		coroutine.yield()
 	end	
+	
 		
 	if ( self:GetRangeTo( lset.loc ) <= options.tolerance + 25 ) then
 		self:RunHook("GotoArrived", options)
@@ -3112,7 +3173,7 @@ end
 
 function ENT:SetFollowTarget(target)	
 	if ( IsValid(target) && (target:IsPlayer() || target:IsNPC()) &&
-		(self:GetRelationship(target) < NIXBOT_RELATION_FRIEND) 
+		(self:GetRelationship(target) < NIXBOT_RELATIONS.NIXBOT_RELATION_FRIEND) 
 			) then
 		return false
 	end
@@ -3132,7 +3193,7 @@ function ENT:Follow (options)
   local target = self.FollowTarget
   
 	if ( !IsValid(target) ||
-	     self:GetRelationship(target) < NIXBOT_RELATION_FRIEND ||
+	     self:GetRelationship(target) < NIXBOT_RELATIONS.NIXBOT_RELATION_FRIEND ||
 	     !target:Alive() ) then
 		return false
 	end
@@ -3146,11 +3207,11 @@ function ENT:Follow (options)
 	
 	if ( self:GetPos():Distance(target:GetPos()) < options.tolerance ) then
 		if ( !self.follow_idle_time ) then
-			self.follow_idle_time = os.time()
+			self.follow_idle_time = SysTime()
 			self.follow_idle_timeout = math.random(160,240)
 		end
 				
-		if ( os.time() - self.follow_idle_time > self.follow_idle_timeout ) then
+		if ( SysTime() - self.follow_idle_time > self.follow_idle_timeout ) then
 			self:PlaySound("FollowIdle")
 			self.follow_idle_time = nil
 			self.CurrentActivity = nil
@@ -3166,9 +3227,12 @@ function ENT:Follow (options)
 	self.path = path
 	path:SetMinLookAheadDistance( options.lookahead or 650 )
 	path:SetGoalTolerance(  options.tolerance  )
-	
-	path:Compute(self, target:GetPos())
-	
+		
+	if ( !path:Compute(self, target:GetPos()) ) then
+		path:Invalidate()
+		return
+	end
+		
 	if ( !path:IsValid()  ) then
 		return
 	end
@@ -3182,9 +3246,9 @@ function ENT:Follow (options)
 		target = self.FollowTarget
 										
 		if ( !IsValid(target) ||
-         self:GetRelationship(target) < NIXBOT_RELATION_FRIEND ) then
-      return false
-    end
+			self:GetRelationship(target) < NIXBOT_RELATIONS.NIXBOT_RELATION_FRIEND ) then
+			return false
+		end
 		
 		local dist = self:GetRangeTo(target:GetPos())
 					
@@ -3213,7 +3277,11 @@ function ENT:Follow (options)
 				end
 				
 				if ( !path:IsValid() ) then
-					path:Compute( self, target:GetPos() )	
+					if ( !path:Compute( self, target:GetPos() )	) then
+						path:Invalidate()
+						break
+					end
+					
 					coroutine.yield()
 					continue
 				end
@@ -3224,12 +3292,20 @@ function ENT:Follow (options)
 			if ( options.persist != true ) then
 				return true
 			else
-				path:Compute(self, target:GetPos())
+				if ( !path:Compute( self, target:GetPos() )	) then
+					break
+				end
+				
+				if ( !path:IsValid() ) then
+					break
+				end
 			end
 		end
 				
 		if ( path:GetAge() > 0.3 ) then
-			path:Compute(self, target:GetPos())
+			if ( !path:Compute( self, target:GetPos() )	) then
+				break
+			end
 		end
 			
 		path:Update(self)	
@@ -3238,19 +3314,19 @@ function ENT:Follow (options)
 		local walk
 				
 		if ( math.abs(dstate - dist) > dtol ) then
-  		dstate = dist
-  		if ( dist > 500 ) then
-  			self:StartActivityE( self:GetAnimAct("Run"), math.Clamp(target:GetRunSpeed() , 0, self:GetStatsRunspeed()), self:GetStatsAccel() )	
-  		else
-  			self:StartActivityE( self:GetAnimAct("Walk"), math.Clamp( target:GetWalkSpeed() , 0, self:GetStatsWalkspeed()), self:GetStatsAccel() )	
-  			walk = true
-  		end	
-  	end	
+			dstate = dist
+			if ( dist > 500 ) then
+				self:StartActivityE( self:GetAnimAct("Run"), math.Clamp(target:GetRunSpeed() , 0, self:GetStatsRunspeed()), self:GetStatsAccel() )	
+			else
+				self:StartActivityE( self:GetAnimAct("Walk"), math.Clamp( target:GetWalkSpeed() , 0, self:GetStatsWalkspeed()), self:GetStatsAccel() )	
+				walk = true
+			end	
+		end	
 		
 		if ( walk ) then
-		  self.loco:FaceTowards(target:EyePos() ) 
-      self:LookAt(target:EyePos())
-    end
+			self.loco:FaceTowards(target:EyePos() ) 
+			self:LookAt(target:EyePos())
+		end
 		
 		coroutine.yield()
 	end	
@@ -3260,18 +3336,22 @@ end
 
 function ENT:MeleeAttack(hitpos, target)
   local tr = util.TraceLine { start = self:EyePos(), endpos = hitpos, mask = MASK_SOLID, filter = {self, self.Weapon} }
-    
+  
   if ( IsValid(tr.Entity) ) then
     local atspeed = 1 - self:GetStatsAthletics()
     self:PlaySequenceAndWaitE( "MeleeAttack01", atspeed, 0.5 )
-    
+	
+	if ( !IsValid(target) ) then
+		return
+	end
+    	
     if ( self:GetPos():Distance(target:GetPos()) > 50 ) then
-      tr = util.TraceLine { start = self:EyePos(), endpos = hitpos, mask = MASK_SOLID, filter = {self, self.Weapon} }
-      
-      if ( !IsValid(tr.Entity) ) then
-        return
-      end
+      tr = util.TraceLine { start = self:EyePos(), endpos = hitpos, mask = MASK_SOLID, filter = {self, self.Weapon} }      
     end
+	
+	if ( !IsValid(tr.Entity) ) then
+		return
+	end
     
     local info = DamageInfo()
     info:SetAttacker( self )
@@ -3299,7 +3379,7 @@ function ENT:EngageEnemy( options )
 	path:SetGoalTolerance( 25 )
 	path:Compute( self, self:GetEnemy():GetPos() - self:GetEnemy():OBBCenter()  )	
 
-	self.target_last_seen = os.time()
+	self.target_last_seen = SysTime()
 	
 	local tlost_c = 0
 	local times_attacked = 0
@@ -3353,14 +3433,14 @@ function ENT:EngageEnemy( options )
 		local target_visible = self:EnemyVisible()
 		
 		if ( target_visible == true )then
-			self.target_last_seen = os.time()
+			self.target_last_seen = SysTime()
 			self.target_pos = enemy:GetPos() 
 			--self:AimAt(self.target_pos)				
 		else
 			
 			if ( self:CalculateCognitionScore(enemy ) 
 					> self:GetStatsAwareness()) then
-				self.target_last_seen = os.time()
+				self.target_last_seen = SysTime()
 				self.target_pos = enemy:GetPos() 	
 				--self:AimAt(self.target_pos) 				
 			end
@@ -3390,8 +3470,7 @@ function ENT:EngageEnemy( options )
 			recompute_path = false
 		end
 		
-		path:Update( self )
-						
+		path:Update( self )						
 		
 		local dist =  self:GetRangeTo( self.target_pos  )
 		
@@ -3424,7 +3503,7 @@ function ENT:EngageEnemy( options )
 			
 			self:AimAt(self:GetPos() + self:GetForward() * 400 )  
 	
-			if ( os.time() - self.target_last_seen > 45) then		
+			if ( SysTime() - self.target_last_seen > 45) then		
 				self:Debug(self:EntIndex(), " target escaped")
 				break
 			end
@@ -3464,11 +3543,11 @@ function ENT:EngageEnemy( options )
 		
 	self:SetMood(NIXBOT_MOOD_STIMULATED)
 
-  if ( !IsValid(self:GetEnemy()) ) then
-    self:RunHook("LostEnemy", options)
-    self:SetEnemy( nil )
+	if ( !IsValid(self:GetEnemy()) ) then
+		self:RunHook("LostEnemy", options)
+		self:SetEnemy( nil )
 	elseif ( !self:HaveEnemy()) then
-	  self:RunHook("LostEnemy", options)
+		self:RunHook("LostEnemy", options)
 		self:Debug(self:EntIndex(), " target gone")	
 		self:SetEnemy( nil )
 		return false
@@ -3517,3 +3596,15 @@ net.Receive("NIXBOT.net.plyctl", function(len, ply)
 	
 	fp(nb, unpack(arg) )
 end)
+	--[[
+hook.Add( "OnEntityCreated", "NIXBOT.ent.create", function ( ent )
+
+	if (ent:IsNPC() && !ent:IsNixBot() && ent:GetClass() != "npc_bullseye" ) then
+		print(ent:IsNixBot(), ent, ent.NixBot)
+		--ent:AddRelationship( "nixbot_alyx D_HT 99" )
+		ent:AddRelationship( "npc_bullseye D_HT -5" )
+	end
+
+end)
+
+]]

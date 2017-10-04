@@ -228,7 +228,7 @@ concommand.Add("nb_reload", function (ply)
 	
 	if ( SERVER ) then
 		timer.Simple(0.25, function()
-			BroadcastLua("NIXBOT:master_reload();")
+			BroadcastLua("NIXBOT:master_reload()")
 		end)
 	end
 end, nil, nil , FCVAR_SERVER_CAN_EXECUTE)

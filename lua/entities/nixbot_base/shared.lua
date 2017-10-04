@@ -61,7 +61,7 @@ do
   if ( meta ) then
     function meta:IsNPC()
       return true
-    end
+    end       
   end
   
 end

@@ -23,20 +23,20 @@ e2function entity nbCreate(string class)
 		hook.Run("PlayerSpawnNPC", self.player, class, nil ) == false ) then
 		return NULL
 	end
+		
+	if ( self.NB_SPC / math.Clamp(SysTime() - self.NBLastSpawned, 1, 5) >= 5 ) then
+		Notify(self.player, "NB spawn/time limit exceeded")
+		return NULL
+	end 
 	
 	local bot = ents.Create( class )
 	
 	if ( !IsValid(bot) ) then
 		return NULL
-	end
-		
-	if ( self.NB_SPC / math.Clamp(RealTime() - self.NBLastSpawned, 1, 5) >= 5 ) then
-	  Notify(self.player, "NB spawn/time limit exceeded")
-    return NULL
-	end 
+	end		
 	
 	self.NB_SPC = self.NB_SPC + 1	
-	self.NBLastSpawned = RealTime()
+	self.NBLastSpawned = SysTime()
 	
 	bot:CPPISetOwner(self.player)	
 	local index = bot:EntIndex()
@@ -146,8 +146,8 @@ e2function entity lastUser()
 end
 
 local function ValidateNixBot(self, bot)
-	if ( bot:CPPIGetOwner() == self.player && 
-			IsValid(bot) && bot:IsNixBot() ) then
+	if ( IsValid(bot) && bot:CPPIGetOwner() == self.player && 
+			bot:IsNixBot() ) then
 		return true
 	end
 	return false
@@ -182,18 +182,20 @@ end
 
 e2function number entity:setRelationship(entity target, number disp, number prio)
 	if ( !ValidateNixBot(self, this) ) then return 0 end
+	
 	return SetRelationship(this, target, disp, prio, 0)
 end
 
 e2function number entity:setRelationship(entity target, number disp, number prio, number persist)
 	if ( !ValidateNixBot(self, this) ) then return 0 end
+	
 	return SetRelationship(this, target, disp, prio, persist)
 end
 
 e2function number entity:setRelationship(entity target, string disposition, number prio)
 	if ( !ValidateNixBot(self, this) ) then return 0 end
 	
-	local disp = _G[disposition]
+	local disp = this.RELATIONS[disposition]
 	
 	if ( !disp || !isnumber(disp) ) then return 0 end		
 	
@@ -309,7 +311,7 @@ registerCallback("construct",function(self)
 	self.CLK_Used = 0
 	self.LastBot = NULL
 	self.LastKilled = NULL
-	self.NBLastSpawned = RealTime()
+	self.NBLastSpawned = SysTime()
 	self.NB_SPC = 0
 end)
 
